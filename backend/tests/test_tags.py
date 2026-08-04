@@ -72,6 +72,22 @@ async def test_archive_missing_tag_returns_404(client):
     assert (await client.delete("/api/tags/999")).status_code == 404
 
 
+async def test_explicit_null_on_non_nullable_field_is_422_not_500(client):
+    """`{"color": null}` must be rejected at validation, never written to a
+    nullable=False column where it would surface as an IntegrityError 500."""
+    tag_id = (
+        await client.post("/api/tags", json={"name": "Solid", "color": "#BDBD9B"})
+    ).json()["id"]
+
+    assert (await client.patch(f"/api/tags/{tag_id}", json={"color": None})).status_code == 422
+    assert (await client.patch(f"/api/tags/{tag_id}", json={"name": None})).status_code == 422
+
+    # Tag.icon IS nullable, so explicit null there is a legitimate clear.
+    cleared = await client.patch(f"/api/tags/{tag_id}", json={"icon": None})
+    assert cleared.status_code == 200
+    assert cleared.json()["icon"] is None
+
+
 async def test_archived_name_still_blocks_duplicates(client):
     """Archived rows keep occupying the unique index — re-creating the name must 409."""
     tag_id = (

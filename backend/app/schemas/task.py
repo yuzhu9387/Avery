@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.models.task import Priority, TaskStatus
 
@@ -25,6 +25,15 @@ class TaskUpdate(BaseModel):
     est_minutes: int | None = None
     is_floating: bool | None = None
     priority: Priority | None = None
+
+    # `due_date` and `est_minutes` are omitted deliberately: both columns are
+    # nullable, so explicit null is how a client clears them.
+    @field_validator("name", "tag_ids", "notes", "status", "is_floating", "priority")
+    @classmethod
+    def reject_explicit_null(cls, value):
+        if value is None:
+            raise ValueError("field cannot be set to null")
+        return value
 
 
 class TaskOut(BaseModel):
