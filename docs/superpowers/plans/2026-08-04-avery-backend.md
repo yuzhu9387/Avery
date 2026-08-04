@@ -31,7 +31,7 @@
 | `backend/app/database.py` | Async engine, session factory, `Base`, `get_session` dep |
 | `backend/app/models/*.py` | One ORM model per file |
 | `backend/app/schemas/*.py` | Pydantic in/out, one file per object |
-| `backend/app/services/tags.py` | Tag CRUD; blocks deleting a tag in use |
+| `backend/app/services/tags.py` | Tag CRUD; archives rather than deletes |
 | `backend/app/services/tasks.py` | Task CRUD, completion, floating queries |
 | `backend/app/services/events.py` | Event CRUD, move, range queries, find-or-create task |
 | `backend/app/services/templates.py` | Template CRUD and `materialize_week` |
@@ -263,7 +263,13 @@ git commit -m "feat: scaffold Avery backend with config, async db, health check"
 
 **Interfaces:**
 - Consumes: `Base`, `get_session`
-- Produces: `Tag` model; `services.tags.list_tags(session, include_archived=False) -> list[Tag]`, `get_tag(session, tag_id) -> Tag | None`, `create_tag(session, data: TagCreate) -> Tag`, `update_tag(session, tag_id, data: TagUpdate) -> Tag | None`, `delete_tag(session, tag_id) -> bool`
+- Produces: `Tag` model; `services.tags.list_tags(session, include_archived=False) -> list[Tag]`, `get_tag(session, tag_id) -> Tag | None`, `create_tag(session, data: TagCreate) -> Tag`, `update_tag(session, tag_id, data: TagUpdate) -> Tag | None`, `archive_tag(session, tag_id) -> Tag | None`
+
+**Tags are never hard-deleted.** Events freeze `tag_ids` onto themselves, and those
+ids are plain JSON ints with no foreign key. Removing a row would leave dangling ids
+that silently drop out of historical analytics. `DELETE /api/tags/{id}` therefore
+archives: the tag disappears from pickers and default listings but stays resolvable
+by id forever. There is exactly one removal path.
 
 - [ ] **Step 1: Write the failing test — `backend/tests/test_tags.py`**
 
@@ -289,7 +295,7 @@ async def test_duplicate_tag_name_rejected(client):
     assert dupe.status_code == 409
 
 
-async def test_update_and_delete_tag(client):
+async def test_update_and_archive_tag(client):
     tag_id = (
         await client.post("/api/tags", json={"name": "Study", "color": "#8FA8A2"})
     ).json()["id"]
@@ -298,13 +304,59 @@ async def test_update_and_delete_tag(client):
     assert patched.status_code == 200
     assert patched.json()["color"] == "#BDBD9B"
 
-    deleted = await client.delete(f"/api/tags/{tag_id}")
-    assert deleted.status_code == 204
-    assert (await client.get(f"/api/tags/{tag_id}")).status_code == 404
+    archived = await client.delete(f"/api/tags/{tag_id}")
+    assert archived.status_code == 200
+    assert archived.json()["archived"] is True
 
 
-async def test_delete_missing_tag_returns_404(client):
+async def test_archived_tag_stays_resolvable_by_id(client):
+    """Events freeze tag ids onto themselves, so an archived tag must stay readable."""
+    tag_id = (
+        await client.post("/api/tags", json={"name": "Old", "color": "#DEDECF"})
+    ).json()["id"]
+    await client.delete(f"/api/tags/{tag_id}")
+
+    fetched = await client.get(f"/api/tags/{tag_id}")
+    assert fetched.status_code == 200
+    assert fetched.json()["archived"] is True
+
+
+async def test_archived_tags_hidden_from_list_by_default(client):
+    keep = (
+        await client.post("/api/tags", json={"name": "Keep", "color": "#BDBD9B"})
+    ).json()["id"]
+    drop = (
+        await client.post("/api/tags", json={"name": "Drop", "color": "#DA96A4"})
+    ).json()["id"]
+    await client.delete(f"/api/tags/{drop}")
+
+    assert [t["id"] for t in (await client.get("/api/tags")).json()] == [keep]
+
+    everything = await client.get("/api/tags", params={"include_archived": True})
+    assert {t["id"] for t in everything.json()} == {keep, drop}
+
+
+async def test_archiving_is_idempotent(client):
+    tag_id = (
+        await client.post("/api/tags", json={"name": "Twice", "color": "#C9A88F"})
+    ).json()["id"]
+    assert (await client.delete(f"/api/tags/{tag_id}")).status_code == 200
+    assert (await client.delete(f"/api/tags/{tag_id}")).status_code == 200
+
+
+async def test_archive_missing_tag_returns_404(client):
     assert (await client.delete("/api/tags/999")).status_code == 404
+
+
+async def test_archived_name_still_blocks_duplicates(client):
+    """Archived rows keep occupying the unique index — re-creating the name must 409."""
+    tag_id = (
+        await client.post("/api/tags", json={"name": "Work", "color": "#DA96A4"})
+    ).json()["id"]
+    await client.delete(f"/api/tags/{tag_id}")
+
+    dupe = await client.post("/api/tags", json={"name": "Work", "color": "#BDBD9B"})
+    assert dupe.status_code == 409
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -430,19 +482,26 @@ async def update_tag(session: AsyncSession, tag_id: int, data: TagUpdate) -> Tag
     return tag
 
 
-async def delete_tag(session: AsyncSession, tag_id: int) -> bool:
+async def archive_tag(session: AsyncSession, tag_id: int) -> Tag | None:
+    """Tags are never hard-deleted — events freeze tag ids onto themselves, so
+    dropping the row would leave dangling ids in historical analytics. Archiving
+    hides the tag from pickers while keeping every past reference resolvable.
+
+    Idempotent: archiving an already-archived tag succeeds and changes nothing.
+    """
     tag = await session.get(Tag, tag_id)
     if tag is None:
-        return False
-    await session.delete(tag)
+        return None
+    tag.archived = True
     await session.commit()
-    return True
+    await session.refresh(tag)
+    return tag
 ```
 
 - [ ] **Step 7: Create `backend/app/routers/tags.py`**
 
 ```python
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
@@ -484,11 +543,12 @@ async def update_tag(tag_id: int, data: TagUpdate, session: AsyncSession = Depen
     return tag
 
 
-@router.delete("/{tag_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_tag(tag_id: int, session: AsyncSession = Depends(get_session)):
-    if not await service.delete_tag(session, tag_id):
+@router.delete("/{tag_id}", response_model=TagOut)
+async def archive_tag(tag_id: int, session: AsyncSession = Depends(get_session)):
+    tag = await service.archive_tag(session, tag_id)
+    if tag is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "tag not found")
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    return tag
 ```
 
 Leave `backend/app/routers/__init__.py` and `backend/app/services/__init__.py` empty.
@@ -506,7 +566,7 @@ app.include_router(tags_router.router)
 - [ ] **Step 9: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (5 tests)
+Expected: PASS (9 tests)
 
 - [ ] **Step 10: Commit**
 
@@ -824,7 +884,7 @@ app.include_router(tasks_router.router)
 - [ ] **Step 9: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (10 tests)
+Expected: PASS (14 tests)
 
 - [ ] **Step 10: Commit**
 
@@ -1268,7 +1328,7 @@ app.include_router(events_router.router)
 - [ ] **Step 9: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (18 tests)
+Expected: PASS (22 tests)
 
 - [ ] **Step 10: Commit**
 
@@ -1578,7 +1638,7 @@ app.include_router(rules_router.router)
 - [ ] **Step 9: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (23 tests)
+Expected: PASS (27 tests)
 
 - [ ] **Step 10: Commit**
 
@@ -1997,7 +2057,7 @@ Expected: PASS (15 tests)
 - [ ] **Step 5: Run the whole suite**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (38 tests)
+Expected: PASS (42 tests)
 
 - [ ] **Step 6: Commit**
 
@@ -2189,7 +2249,7 @@ app.include_router(analytics_router.router)
 - [ ] **Step 6: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (41 tests)
+Expected: PASS (45 tests)
 
 - [ ] **Step 7: Commit**
 
@@ -2717,7 +2777,7 @@ app.include_router(templates_router.week_router)
 - [ ] **Step 9: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (50 tests)
+Expected: PASS (54 tests)
 
 - [ ] **Step 10: Commit**
 
@@ -2996,7 +3056,7 @@ Register this **after** `templates_router.week_router` — both use the `/api/we
 - [ ] **Step 6: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (59 tests)
+Expected: PASS (63 tests)
 
 - [ ] **Step 7: Commit**
 
@@ -3305,7 +3365,7 @@ app.include_router(reports_router.router)
 - [ ] **Step 9: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (66 tests)
+Expected: PASS (70 tests)
 
 - [ ] **Step 10: Commit**
 
@@ -3656,7 +3716,7 @@ app.include_router(reminders_router.router)
 - [ ] **Step 9: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (73 tests)
+Expected: PASS (77 tests)
 
 - [ ] **Step 10: Commit**
 
@@ -3913,7 +3973,7 @@ app.include_router(seed_router.router)
 - [ ] **Step 6: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (78 tests)
+Expected: PASS (82 tests)
 
 If `test_seeded_week_materializes_and_matches_631_shape` reports A/B verdicts other than `pass`, the seed block times are wrong — recheck them against the table in Step 3 before changing the analytics engine. The engine is proven by Task 6's tests.
 
@@ -4131,7 +4191,7 @@ app = FastAPI(title="Avery", version="0.1.0", lifespan=lifespan)
 - [ ] **Step 5: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (83 tests)
+Expected: PASS (87 tests)
 
 - [ ] **Step 6: Verify the server actually boots**
 
@@ -4263,7 +4323,7 @@ Creates the eight tags, the 6:3:1 rule, and the default weekly template.
 - [ ] **Step 6: Run the full suite one last time**
 
 Run: `cd backend && .venv/bin/pytest -v`
-Expected: PASS (83 tests)
+Expected: PASS (87 tests)
 
 - [ ] **Step 7: Commit**
 

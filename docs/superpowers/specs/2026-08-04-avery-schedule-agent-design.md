@@ -129,9 +129,15 @@ Free-form and first-class, so it can carry a color. Users create their own.
 | `color` | str | hex, from the palette |
 | `icon` | str nullable | emoji or icon key |
 | `sort_order` | int | display order |
-| `archived` | bool | soft delete |
+| `archived` | bool | the only removal path — see below |
 
 **Seed tags:** Rest, Work, Study, Commute, Kids/Family, Chores/Prep, Fitness, Personal.
+
+**Tags are never hard-deleted.** Events freeze `tag_ids` onto themselves and those ids
+are plain JSON ints with no foreign key, so dropping a row would leave dangling ids that
+silently disappear from historical analytics. `DELETE /api/tags/{id}` archives instead:
+the tag vanishes from pickers and default listings but stays resolvable by id forever,
+and the operation is idempotent. There is exactly one removal path, not two.
 
 ### Task — the *what*
 
