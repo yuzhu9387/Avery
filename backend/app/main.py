@@ -6,6 +6,7 @@ from app.routers import events as events_router
 from app.routers import rules as rules_router
 from app.routers import tags as tags_router
 from app.routers import tasks as tasks_router
+from app.routers import templates as templates_router
 
 app = FastAPI(title="Avery", version="0.1.0")
 
@@ -22,6 +23,9 @@ app.include_router(tasks_router.router)
 app.include_router(events_router.router)
 app.include_router(rules_router.router)
 app.include_router(analytics_router.router)
+app.include_router(templates_router.router)
+app.include_router(templates_router.block_router)
+app.include_router(templates_router.week_router)
 
 
 @app.get("/api/health")
