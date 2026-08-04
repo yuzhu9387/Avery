@@ -48,6 +48,32 @@ async def test_evaluate_without_rule_returns_409(client):
     assert result.status_code == 409
 
 
+async def test_unknown_rule_id_is_404_not_409(client):
+    """409 means "you have no rule at all". Saying that to a client whose rule_id
+    is merely typo'd sends them chasing a problem they do not have."""
+    await _setup(client)
+    result = await client.post(
+        "/api/analytics/evaluate",
+        json={
+            "period_start": "2026-08-01T00:00:00",
+            "period_end": "2026-09-01T00:00:00",
+            "rule_id": 9999,
+        },
+    )
+    assert result.status_code == 404
+
+
+async def test_inverted_period_is_422_not_a_false_under(client):
+    """A reversed range must not return 200 with every group "under" — that is
+    indistinguishable from a month where nothing was logged."""
+    await _setup(client)
+    result = await client.post(
+        "/api/analytics/evaluate",
+        json={"period_start": "2026-09-01T00:00:00", "period_end": "2026-08-01T00:00:00"},
+    )
+    assert result.status_code == 422
+
+
 async def test_evaluate_with_explicit_rule_id(client):
     await _setup(client)
     rule_id = (await client.get("/api/rules/active")).json()["id"]

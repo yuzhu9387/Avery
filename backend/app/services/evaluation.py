@@ -14,6 +14,14 @@ class NoActiveRule(Exception):
     """Raised when an evaluation is requested but no rule has ever been created."""
 
 
+class RuleNotFound(Exception):
+    """Raised when an explicit rule_id names a rule that does not exist.
+
+    Distinct from NoActiveRule on purpose: telling a client with a typo'd rule_id
+    to "create a rule first" sends them chasing a problem they do not have.
+    """
+
+
 def to_slice(event: Event) -> EventSlice:
     return EventSlice(
         id=event.id,
@@ -31,10 +39,12 @@ async def evaluate_period(
 ) -> tuple[Evaluation, Rule]:
     if rule_id is None:
         rule = await rule_service.get_active_rule(session)
+        if rule is None:
+            raise NoActiveRule()
     else:
         rule = await rule_service.get_rule(session, rule_id)
-    if rule is None:
-        raise NoActiveRule()
+        if rule is None:
+            raise RuleNotFound(rule_id)
 
     rows = await event_service.list_events(session, start=period_start, end=period_end)
     slices = [to_slice(e) for e in rows]

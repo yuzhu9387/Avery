@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
@@ -16,6 +16,14 @@ class EvaluateRequest(BaseModel):
     period_end: datetime
     rule_id: int | None = None
 
+    @model_validator(mode="after")
+    def check_period(self) -> "EvaluateRequest":
+        # Without this, a reversed range returns 200 with every group "under" —
+        # a payload indistinguishable from a month in which nothing was logged.
+        if self.period_end <= self.period_start:
+            raise ValueError("period_end must be after period_start")
+        return self
+
 
 @router.post("/evaluate")
 async def evaluate_period(
@@ -27,6 +35,8 @@ async def evaluate_period(
         )
     except service.NoActiveRule:
         raise HTTPException(status.HTTP_409_CONFLICT, "no active rule — create one first")
+    except service.RuleNotFound:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"rule {body.rule_id} not found")
     return {
         "period_start": body.period_start,
         "period_end": body.period_end,
