@@ -21,6 +21,15 @@
 - **Rules are never mutated in place.** Editing closes the current row (`effective_to`) and inserts a new one.
 - **Reports are append-only.** No `PATCH /api/reports/{id}` may exist.
 - Ratio verdicts use *relative* tolerance: `|(actual − target) / target| <= tolerance`.
+- **No `*Update` schema may accept an explicit `null` for a column that is
+  `nullable=False`.** Update schemas type every field `X | None = None` so that
+  `model_dump(exclude_unset=True)` can tell an omitted field from a supplied one. That
+  default also makes an explicit `{"field": null}` look like a legitimate value, and
+  writing it raises an uncaught `IntegrityError` — an HTTP 500 where a 422 belongs. Every
+  `*Update` schema therefore carries a `field_validator` rejecting `None` on exactly those
+  fields whose model column is `nullable=False`. Fields whose column *is* nullable
+  (`due_date`, `est_minutes`, `icon`, `dismissed_at`) must keep accepting explicit null —
+  that is how a client clears them.
 - Every task ends with a passing test run and a commit.
 
 ## File Structure
@@ -348,6 +357,22 @@ async def test_archive_missing_tag_returns_404(client):
     assert (await client.delete("/api/tags/999")).status_code == 404
 
 
+async def test_explicit_null_on_non_nullable_field_is_422_not_500(client):
+    """`{"color": null}` must be rejected at validation, never written to a
+    nullable=False column where it would surface as an IntegrityError 500."""
+    tag_id = (
+        await client.post("/api/tags", json={"name": "Solid", "color": "#BDBD9B"})
+    ).json()["id"]
+
+    assert (await client.patch(f"/api/tags/{tag_id}", json={"color": None})).status_code == 422
+    assert (await client.patch(f"/api/tags/{tag_id}", json={"name": None})).status_code == 422
+
+    # Tag.icon IS nullable, so explicit null there is a legitimate clear.
+    cleared = await client.patch(f"/api/tags/{tag_id}", json={"icon": None})
+    assert cleared.status_code == 200
+    assert cleared.json()["icon"] is None
+
+
 async def test_archived_name_still_blocks_duplicates(client):
     """Archived rows keep occupying the unique index — re-creating the name must 409."""
     tag_id = (
@@ -395,7 +420,7 @@ __all__ = ["Tag"]
 - [ ] **Step 5: Create `backend/app/schemas/tag.py`**
 
 ```python
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class TagCreate(BaseModel):
@@ -411,6 +436,14 @@ class TagUpdate(BaseModel):
     icon: str | None = None
     sort_order: int | None = None
     archived: bool | None = None
+
+    # `icon` is omitted deliberately: Tag.icon is nullable, so explicit null clears it.
+    @field_validator("name", "color", "sort_order", "archived")
+    @classmethod
+    def reject_explicit_null(cls, value):
+        if value is None:
+            raise ValueError("field cannot be set to null")
+        return value
 
 
 class TagOut(BaseModel):
@@ -566,7 +599,7 @@ app.include_router(tags_router.router)
 - [ ] **Step 9: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (9 tests)
+Expected: PASS (10 tests)
 
 - [ ] **Step 10: Commit**
 
@@ -629,6 +662,40 @@ async def test_reopening_task_clears_completed_at(client):
     await client.patch(f"/api/tasks/{task_id}", json={"status": "done"})
     reopened = await client.patch(f"/api/tasks/{task_id}", json={"status": "todo"})
     assert reopened.json()["completed_at"] is None
+
+
+async def test_explicit_null_on_non_nullable_field_is_422_not_500(client):
+    """`{"tag_ids": null}` must be rejected at validation, never written to a
+    nullable=False column where it would surface as an IntegrityError 500."""
+    task_id = (
+        await client.post("/api/tasks", json={"name": "Solid", "tag_ids": []})
+    ).json()["id"]
+
+    assert (await client.patch(f"/api/tasks/{task_id}", json={"tag_ids": None})).status_code == 422
+    assert (await client.patch(f"/api/tasks/{task_id}", json={"status": None})).status_code == 422
+
+    # Task.due_date IS nullable, so explicit null there is a legitimate clear.
+    await client.patch(f"/api/tasks/{task_id}", json={"due_date": "2026-09-01"})
+    cleared = await client.patch(f"/api/tasks/{task_id}", json={"due_date": None})
+    assert cleared.status_code == 200
+    assert cleared.json()["due_date"] is None
+
+
+async def test_partial_patch_leaves_unmentioned_fields_alone(client):
+    """A PATCH omitting status must not clear completed_at; one omitting due_date
+    must not wipe it. This is the invariant `exclude_unset=True` exists to protect."""
+    task_id = (
+        await client.post(
+            "/api/tasks", json={"name": "Gym", "tag_ids": [], "due_date": "2026-09-01"}
+        )
+    ).json()["id"]
+    await client.patch(f"/api/tasks/{task_id}", json={"status": "done"})
+
+    patched = await client.patch(f"/api/tasks/{task_id}", json={"notes": "went twice"})
+    body = patched.json()
+    assert body["status"] == "done"
+    assert body["completed_at"] is not None
+    assert body["due_date"] == "2026-09-01"
 
 
 async def test_delete_task(client):
@@ -699,7 +766,7 @@ __all__ = ["Tag", "Task", "TaskStatus", "Priority"]
 ```python
 from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.models.task import Priority, TaskStatus
 
@@ -724,6 +791,15 @@ class TaskUpdate(BaseModel):
     est_minutes: int | None = None
     is_floating: bool | None = None
     priority: Priority | None = None
+
+    # `due_date` and `est_minutes` are omitted deliberately: both columns are
+    # nullable, so explicit null is how a client clears them.
+    @field_validator("name", "tag_ids", "notes", "status", "is_floating", "priority")
+    @classmethod
+    def reject_explicit_null(cls, value):
+        if value is None:
+            raise ValueError("field cannot be set to null")
+        return value
 
 
 class TaskOut(BaseModel):
@@ -884,7 +960,7 @@ app.include_router(tasks_router.router)
 - [ ] **Step 9: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (14 tests)
+Expected: PASS (17 tests)
 
 - [ ] **Step 10: Commit**
 
@@ -1023,6 +1099,26 @@ async def test_cross_midnight_event_stored_intact(client):
     assert created.json()["end_at"] == "2026-08-04T07:00:00"
 
 
+async def test_explicit_null_on_non_nullable_field_is_422_not_500(client):
+    """Every EventUpdate field maps to a nullable=False column, so an explicit
+    null must be a 422 rather than an IntegrityError 500."""
+    task_id = await _task(client)
+    event_id = (
+        await client.post(
+            "/api/events",
+            json={
+                "task_id": task_id,
+                "start_at": "2026-08-03T09:00:00",
+                "end_at": "2026-08-03T10:00:00",
+            },
+        )
+    ).json()["id"]
+
+    for field in ("start_at", "end_at", "tag_ids", "notes"):
+        patched = await client.patch(f"/api/events/{event_id}", json={field: None})
+        assert patched.status_code == 422, field
+
+
 async def test_delete_event(client):
     task_id = await _task(client)
     event_id = (
@@ -1098,7 +1194,7 @@ __all__ = ["Tag", "Task", "TaskStatus", "Priority", "Event", "EventSource"]
 ```python
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.models.event import EventSource
 
@@ -1127,6 +1223,14 @@ class EventUpdate(BaseModel):
     end_at: datetime | None = None
     tag_ids: list[int] | None = None
     notes: str | None = None
+
+    # Every Event column here is nullable=False, so none of them may be nulled.
+    @field_validator("start_at", "end_at", "tag_ids", "notes")
+    @classmethod
+    def reject_explicit_null(cls, value):
+        if value is None:
+            raise ValueError("field cannot be set to null")
+        return value
 
     @model_validator(mode="after")
     def check(self) -> "EventUpdate":
@@ -1328,7 +1432,7 @@ app.include_router(events_router.router)
 - [ ] **Step 9: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (22 tests)
+Expected: PASS (26 tests)
 
 - [ ] **Step 10: Commit**
 
@@ -1638,7 +1742,7 @@ app.include_router(rules_router.router)
 - [ ] **Step 9: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (27 tests)
+Expected: PASS (31 tests)
 
 - [ ] **Step 10: Commit**
 
@@ -2057,7 +2161,7 @@ Expected: PASS (15 tests)
 - [ ] **Step 5: Run the whole suite**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (42 tests)
+Expected: PASS (46 tests)
 
 - [ ] **Step 6: Commit**
 
@@ -2249,7 +2353,7 @@ app.include_router(analytics_router.router)
 - [ ] **Step 6: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (45 tests)
+Expected: PASS (49 tests)
 
 - [ ] **Step 7: Commit**
 
@@ -2777,7 +2881,7 @@ app.include_router(templates_router.week_router)
 - [ ] **Step 9: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (54 tests)
+Expected: PASS (58 tests)
 
 - [ ] **Step 10: Commit**
 
@@ -3056,7 +3160,7 @@ Register this **after** `templates_router.week_router` — both use the `/api/we
 - [ ] **Step 6: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (63 tests)
+Expected: PASS (67 tests)
 
 - [ ] **Step 7: Commit**
 
@@ -3365,7 +3469,7 @@ app.include_router(reports_router.router)
 - [ ] **Step 9: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (70 tests)
+Expected: PASS (74 tests)
 
 - [ ] **Step 10: Commit**
 
@@ -3468,6 +3572,30 @@ async def test_dismissed_reminders_are_not_due(client, session):
     assert await service.list_due(session, datetime(2026, 8, 10, 12, 0)) == []
 
 
+async def test_explicit_null_on_non_nullable_field_is_422_not_500(client):
+    """`remind_at` and `channel` are nullable=False; `dismissed_at` is nullable,
+    so nulling it is the legitimate way to un-dismiss."""
+    task_id = await _task(client)
+    reminder_id = (
+        await client.post(
+            "/api/reminders", json={"task_id": task_id, "remind_at": "2026-08-10T09:00:00"}
+        )
+    ).json()["id"]
+
+    for field in ("remind_at", "channel"):
+        patched = await client.patch(f"/api/reminders/{reminder_id}", json={field: None})
+        assert patched.status_code == 422, field
+
+    await client.patch(
+        f"/api/reminders/{reminder_id}", json={"dismissed_at": "2026-08-10T09:05:00"}
+    )
+    undismissed = await client.patch(
+        f"/api/reminders/{reminder_id}", json={"dismissed_at": None}
+    )
+    assert undismissed.status_code == 200
+    assert undismissed.json()["dismissed_at"] is None
+
+
 async def test_delete_reminder(client):
     task_id = await _task(client)
     reminder_id = (
@@ -3536,7 +3664,7 @@ __all__ = [
 ```python
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 from app.models.reminder import Channel
 
@@ -3551,6 +3679,15 @@ class ReminderUpdate(BaseModel):
     remind_at: datetime | None = None
     channel: Channel | None = None
     dismissed_at: datetime | None = None
+
+    # `dismissed_at` is omitted deliberately: that column is nullable, and setting
+    # it back to null is how a client un-dismisses a reminder.
+    @field_validator("remind_at", "channel")
+    @classmethod
+    def reject_explicit_null(cls, value):
+        if value is None:
+            raise ValueError("field cannot be set to null")
+        return value
 
 
 class ReminderOut(BaseModel):
@@ -3716,7 +3853,7 @@ app.include_router(reminders_router.router)
 - [ ] **Step 9: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (77 tests)
+Expected: PASS (82 tests)
 
 - [ ] **Step 10: Commit**
 
@@ -3973,7 +4110,7 @@ app.include_router(seed_router.router)
 - [ ] **Step 6: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (82 tests)
+Expected: PASS (87 tests)
 
 If `test_seeded_week_materializes_and_matches_631_shape` reports A/B verdicts other than `pass`, the seed block times are wrong — recheck them against the table in Step 3 before changing the analytics engine. The engine is proven by Task 6's tests.
 
@@ -4191,7 +4328,7 @@ app = FastAPI(title="Avery", version="0.1.0", lifespan=lifespan)
 - [ ] **Step 5: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (87 tests)
+Expected: PASS (92 tests)
 
 - [ ] **Step 6: Verify the server actually boots**
 
@@ -4323,7 +4460,7 @@ Creates the eight tags, the 6:3:1 rule, and the default weekly template.
 - [ ] **Step 6: Run the full suite one last time**
 
 Run: `cd backend && .venv/bin/pytest -v`
-Expected: PASS (87 tests)
+Expected: PASS (92 tests)
 
 - [ ] **Step 7: Commit**
 
