@@ -51,10 +51,17 @@ async def update_tag(session: AsyncSession, tag_id: int, data: TagUpdate) -> Tag
     return tag
 
 
-async def delete_tag(session: AsyncSession, tag_id: int) -> bool:
+async def archive_tag(session: AsyncSession, tag_id: int) -> Tag | None:
+    """Tags are never hard-deleted — events freeze tag ids onto themselves, so
+    dropping the row would leave dangling ids in historical analytics. Archiving
+    hides the tag from pickers while keeping every past reference resolvable.
+
+    Idempotent: archiving an already-archived tag succeeds and changes nothing.
+    """
     tag = await session.get(Tag, tag_id)
     if tag is None:
-        return False
-    await session.delete(tag)
+        return None
+    tag.archived = True
     await session.commit()
-    return True
+    await session.refresh(tag)
+    return tag

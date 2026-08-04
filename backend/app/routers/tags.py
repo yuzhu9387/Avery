@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
@@ -40,8 +40,9 @@ async def update_tag(tag_id: int, data: TagUpdate, session: AsyncSession = Depen
     return tag
 
 
-@router.delete("/{tag_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_tag(tag_id: int, session: AsyncSession = Depends(get_session)):
-    if not await service.delete_tag(session, tag_id):
+@router.delete("/{tag_id}", response_model=TagOut)
+async def archive_tag(tag_id: int, session: AsyncSession = Depends(get_session)):
+    tag = await service.archive_tag(session, tag_id)
+    if tag is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "tag not found")
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    return tag
