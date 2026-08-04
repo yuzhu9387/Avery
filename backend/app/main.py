@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.routers import tags as tags_router
+from app.routers import tasks as tasks_router
 
 app = FastAPI(title="Avery", version="0.1.0")
 
@@ -14,6 +15,7 @@ app.add_middleware(
 )
 
 app.include_router(tags_router.router)
+app.include_router(tasks_router.router)
 
 
 @app.get("/api/health")
