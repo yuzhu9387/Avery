@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.routers import analytics as analytics_router
 from app.routers import events as events_router
 from app.routers import rules as rules_router
 from app.routers import tags as tags_router
@@ -20,6 +21,7 @@ app.include_router(tags_router.router)
 app.include_router(tasks_router.router)
 app.include_router(events_router.router)
 app.include_router(rules_router.router)
+app.include_router(analytics_router.router)
 
 
 @app.get("/api/health")
