@@ -1099,6 +1099,55 @@ async def test_cross_midnight_event_stored_intact(client):
     assert created.json()["end_at"] == "2026-08-04T07:00:00"
 
 
+async def test_rejected_patch_leaves_no_dirty_state(client):
+    """A PATCH moving start_at past end_at must be rejected AND leave nothing
+    half-applied. Requests share one session, so an object left dirty here gets
+    flushed by the next unrelated commit."""
+    task_id = await _task(client)
+    event_id = (
+        await client.post(
+            "/api/events",
+            json={
+                "task_id": task_id,
+                "start_at": "2026-08-03T09:00:00",
+                "end_at": "2026-08-03T10:00:00",
+            },
+        )
+    ).json()["id"]
+
+    rejected = await client.patch(
+        f"/api/events/{event_id}", json={"start_at": "2026-08-03T11:00:00"}
+    )
+    assert rejected.status_code == 422
+
+    # A later, unrelated write must not carry the rejected start_at with it.
+    await client.post("/api/tags", json={"name": "Unrelated", "color": "#BDBD9B"})
+
+    refetched = await client.get(f"/api/events/{event_id}")
+    assert refetched.json()["start_at"] == "2026-08-03T09:00:00"
+    assert refetched.json()["end_at"] == "2026-08-03T10:00:00"
+
+
+async def test_range_filter_excludes_exact_boundaries(client):
+    """Half-open window: an event ending exactly at the window start and one
+    starting exactly at the window end are both outside it. This is what stops
+    adjacent days double-counting the same event."""
+    task_id = await _task(client)
+    for start, end in (
+        ("2026-08-03T08:00:00", "2026-08-03T09:00:00"),  # ends at window start
+        ("2026-08-03T17:00:00", "2026-08-03T18:00:00"),  # starts at window end
+        ("2026-08-03T09:00:00", "2026-08-03T10:00:00"),  # inside
+    ):
+        await client.post(
+            "/api/events", json={"task_id": task_id, "start_at": start, "end_at": end}
+        )
+
+    listed = await client.get(
+        "/api/events", params={"start": "2026-08-03T09:00:00", "end": "2026-08-03T17:00:00"}
+    )
+    assert [e["start_at"] for e in listed.json()] == ["2026-08-03T09:00:00"]
+
+
 async def test_explicit_null_on_non_nullable_field_is_422_not_500(client):
     """Every EventUpdate field maps to a nullable=False column, so an explicit
     null must be a 422 rather than an IntegrityError 500."""
@@ -1318,14 +1367,25 @@ async def create_event(session: AsyncSession, data: EventCreate) -> Event:
 
 
 async def update_event(session: AsyncSession, event_id: int, data: EventUpdate) -> Event | None:
+    """Validate against the PROSPECTIVE values before mutating anything.
+
+    Assigning first and checking afterwards leaves the ORM object dirty in the
+    session when the check fails: the caller gets its 422, but the next commit on
+    that same session flushes the invalid row anyway. Requests share one session,
+    so that is a real corruption path, not a theoretical one.
+    """
     event = await session.get(Event, event_id)
     if event is None:
         return None
     fields = data.model_dump(exclude_unset=True)
+
+    new_start = fields.get("start_at", event.start_at)
+    new_end = fields.get("end_at", event.end_at)
+    if new_end <= new_start:
+        raise ValueError("end_at must be after start_at")
+
     for key, value in fields.items():
         setattr(event, key, value)
-    if event.end_at <= event.start_at:
-        raise ValueError("end_at must be after start_at")
     await session.commit()
     await session.refresh(event)
     return event
@@ -1432,7 +1492,7 @@ app.include_router(events_router.router)
 - [ ] **Step 9: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (26 tests)
+Expected: PASS (28 tests)
 
 - [ ] **Step 10: Commit**
 
@@ -1742,7 +1802,7 @@ app.include_router(rules_router.router)
 - [ ] **Step 9: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (31 tests)
+Expected: PASS (33 tests)
 
 - [ ] **Step 10: Commit**
 
@@ -2161,7 +2221,7 @@ Expected: PASS (15 tests)
 - [ ] **Step 5: Run the whole suite**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (46 tests)
+Expected: PASS (48 tests)
 
 - [ ] **Step 6: Commit**
 
@@ -2353,7 +2413,7 @@ app.include_router(analytics_router.router)
 - [ ] **Step 6: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (49 tests)
+Expected: PASS (51 tests)
 
 - [ ] **Step 7: Commit**
 
@@ -2881,7 +2941,7 @@ app.include_router(templates_router.week_router)
 - [ ] **Step 9: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (58 tests)
+Expected: PASS (60 tests)
 
 - [ ] **Step 10: Commit**
 
@@ -3160,7 +3220,7 @@ Register this **after** `templates_router.week_router` — both use the `/api/we
 - [ ] **Step 6: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (67 tests)
+Expected: PASS (69 tests)
 
 - [ ] **Step 7: Commit**
 
@@ -3469,7 +3529,7 @@ app.include_router(reports_router.router)
 - [ ] **Step 9: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (74 tests)
+Expected: PASS (76 tests)
 
 - [ ] **Step 10: Commit**
 
@@ -3853,7 +3913,7 @@ app.include_router(reminders_router.router)
 - [ ] **Step 9: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (82 tests)
+Expected: PASS (84 tests)
 
 - [ ] **Step 10: Commit**
 
@@ -4110,7 +4170,7 @@ app.include_router(seed_router.router)
 - [ ] **Step 6: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (87 tests)
+Expected: PASS (89 tests)
 
 If `test_seeded_week_materializes_and_matches_631_shape` reports A/B verdicts other than `pass`, the seed block times are wrong — recheck them against the table in Step 3 before changing the analytics engine. The engine is proven by Task 6's tests.
 
@@ -4328,7 +4388,7 @@ app = FastAPI(title="Avery", version="0.1.0", lifespan=lifespan)
 - [ ] **Step 5: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (92 tests)
+Expected: PASS (94 tests)
 
 - [ ] **Step 6: Verify the server actually boots**
 
@@ -4460,7 +4520,7 @@ Creates the eight tags, the 6:3:1 rule, and the default weekly template.
 - [ ] **Step 6: Run the full suite one last time**
 
 Run: `cd backend && .venv/bin/pytest -v`
-Expected: PASS (92 tests)
+Expected: PASS (94 tests)
 
 - [ ] **Step 7: Commit**
 
