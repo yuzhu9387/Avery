@@ -220,6 +220,10 @@ Editing a rule **closes** the current row (`effective_to = today`) and **inserts
 one. Nothing is ever updated in place, so every rule the user has ever committed to
 remains recoverable with the note explaining why it changed.
 
+There is no `PATCH /api/rules/{id}` — editing means creating a version. `DELETE` exists but
+**refuses with 409 once any report snapshots that rule**, so a stored report can never point
+at a rule that no longer exists. A superseded rule nothing ever reported on stays removable.
+
 A report **snapshots the rule that is active at the moment it is generated**, storing that
 `rule_id` permanently. Reviewing February in March therefore judges February against
 March's rule — you are always measured against the standard you currently hold yourself
@@ -474,7 +478,8 @@ GET    POST                    /api/events        /api/events/{id}      PATCH DE
 GET    POST                    /api/templates     /api/templates/{id}   PATCH DELETE
 GET    POST                    /api/templates/{id}/blocks
                                /api/template-blocks/{id}                PATCH DELETE
-GET    POST                    /api/rules         /api/rules/{id}       PATCH DELETE
+GET    POST                    /api/rules         /api/rules/{id}             DELETE
+GET                            /api/rules/active
 GET    POST                    /api/reports       /api/reports/{id}           DELETE
 GET    POST                    /api/reminders     /api/reminders/{id}   PATCH DELETE
 

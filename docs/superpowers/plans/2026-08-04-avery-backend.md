@@ -3235,7 +3235,7 @@ git commit -m "feat: add week and month calendar payloads with lazy materializat
 
 **Files:**
 - Create: `backend/app/models/report.py`, `backend/app/schemas/report.py`, `backend/app/services/reports.py`, `backend/app/routers/reports.py`, `backend/tests/test_reports.py`
-- Modify: `backend/app/models/__init__.py`, `backend/app/main.py`
+- Modify: `backend/app/models/__init__.py`, `backend/app/main.py`, `backend/app/services/rules.py`, `backend/app/routers/rules.py`
 
 **Interfaces:**
 - Consumes: `services.evaluation.evaluate_period`, `services.rules.get_active_rule`
@@ -3335,6 +3335,26 @@ async def test_delete_report(client):
     report_id = (await client.post("/api/reports/run", json={"month": "2026-08"})).json()["id"]
     assert (await client.delete(f"/api/reports/{report_id}")).status_code == 204
     assert (await client.get(f"/api/reports/{report_id}")).status_code == 404
+
+
+async def test_deleting_a_rule_a_report_snapshots_is_409(client):
+    """A report freezes rule_id forever, so that rule must become undeletable."""
+    await _setup(client)
+    rule_id = (await client.get("/api/rules/active")).json()["id"]
+    await client.post("/api/reports/run", json={"month": "2026-08"})
+
+    blocked = await client.delete(f"/api/rules/{rule_id}")
+    assert blocked.status_code == 409
+    assert (await client.get(f"/api/rules/{rule_id}")).status_code == 200
+
+
+async def test_deleting_an_unreferenced_rule_still_works(client):
+    """A superseded rule no report ever snapshotted stays removable."""
+    await _setup(client)
+    superseded_id = (await client.get("/api/rules/active")).json()["id"]
+    await client.post("/api/rules", json={**RULE_BODY, "name": "successor"})
+
+    assert (await client.delete(f"/api/rules/{superseded_id}")).status_code == 204
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -3518,6 +3538,52 @@ async def delete_report(report_id: int, session: AsyncSession = Depends(get_sess
 
 There is deliberately **no PATCH route**. Do not add one.
 
+- [ ] **Step 7b: Guard rule deletion against referencing reports**
+
+A Report freezes `rule_id` permanently. Hard-deleting that rule would leave the report
+pointing at nothing and the Review page unable to render it. Task 5 could not enforce this
+— `Report` did not exist yet — so the guard lands here, where it can.
+
+In `backend/app/services/rules.py`, add `Report` to the model import, define the exception,
+and replace `delete_rule`:
+
+```python
+class RuleInUse(Exception):
+    """Raised when a rule cannot be deleted because a report snapshots it."""
+
+
+async def delete_rule(session: AsyncSession, rule_id: int) -> bool:
+    rule = await session.get(Rule, rule_id)
+    if rule is None:
+        return False
+    referencing = (
+        await session.scalars(select(Report.id).where(Report.rule_id == rule_id).limit(1))
+    ).first()
+    if referencing is not None:
+        raise RuleInUse(rule_id)
+    await session.delete(rule)
+    await session.commit()
+    return True
+```
+
+In `backend/app/routers/rules.py`, replace the delete route:
+
+```python
+@router.delete("/{rule_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_rule(rule_id: int, session: AsyncSession = Depends(get_session)):
+    try:
+        deleted = await service.delete_rule(session, rule_id)
+    except service.RuleInUse:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "rule is snapshotted by a report and cannot be deleted"
+        )
+    if not deleted:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "rule not found")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+```
+
+`services/rules.py` importing `Report` creates no cycle — models never import services.
+
 - [ ] **Step 8: Register in `backend/app/main.py`**
 
 ```python
@@ -3529,7 +3595,7 @@ app.include_router(reports_router.router)
 - [ ] **Step 9: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (76 tests)
+Expected: PASS (78 tests)
 
 - [ ] **Step 10: Commit**
 
@@ -3913,7 +3979,7 @@ app.include_router(reminders_router.router)
 - [ ] **Step 9: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (84 tests)
+Expected: PASS (86 tests)
 
 - [ ] **Step 10: Commit**
 
@@ -4170,7 +4236,7 @@ app.include_router(seed_router.router)
 - [ ] **Step 6: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (89 tests)
+Expected: PASS (91 tests)
 
 If `test_seeded_week_materializes_and_matches_631_shape` reports A/B verdicts other than `pass`, the seed block times are wrong — recheck them against the table in Step 3 before changing the analytics engine. The engine is proven by Task 6's tests.
 
@@ -4388,7 +4454,7 @@ app = FastAPI(title="Avery", version="0.1.0", lifespan=lifespan)
 - [ ] **Step 5: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (94 tests)
+Expected: PASS (96 tests)
 
 - [ ] **Step 6: Verify the server actually boots**
 
@@ -4520,7 +4586,7 @@ Creates the eight tags, the 6:3:1 rule, and the default weekly template.
 - [ ] **Step 6: Run the full suite one last time**
 
 Run: `cd backend && .venv/bin/pytest -v`
-Expected: PASS (94 tests)
+Expected: PASS (96 tests)
 
 - [ ] **Step 7: Commit**
 
