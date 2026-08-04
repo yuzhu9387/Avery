@@ -133,6 +133,55 @@ async def test_explicit_null_on_non_nullable_field_is_422_not_500(client):
         assert patched.status_code == 422, field
 
 
+async def test_rejected_patch_leaves_no_dirty_state(client):
+    """A PATCH moving start_at past end_at must be rejected AND leave nothing
+    half-applied. Requests share one session, so an object left dirty here gets
+    flushed by the next unrelated commit."""
+    task_id = await _task(client)
+    event_id = (
+        await client.post(
+            "/api/events",
+            json={
+                "task_id": task_id,
+                "start_at": "2026-08-03T09:00:00",
+                "end_at": "2026-08-03T10:00:00",
+            },
+        )
+    ).json()["id"]
+
+    rejected = await client.patch(
+        f"/api/events/{event_id}", json={"start_at": "2026-08-03T11:00:00"}
+    )
+    assert rejected.status_code == 422
+
+    # A later, unrelated write must not carry the rejected start_at with it.
+    await client.post("/api/tags", json={"name": "Unrelated", "color": "#BDBD9B"})
+
+    refetched = await client.get(f"/api/events/{event_id}")
+    assert refetched.json()["start_at"] == "2026-08-03T09:00:00"
+    assert refetched.json()["end_at"] == "2026-08-03T10:00:00"
+
+
+async def test_range_filter_excludes_exact_boundaries(client):
+    """Half-open window: an event ending exactly at the window start and one
+    starting exactly at the window end are both outside it. This is what stops
+    adjacent days double-counting the same event."""
+    task_id = await _task(client)
+    for start, end in (
+        ("2026-08-03T08:00:00", "2026-08-03T09:00:00"),  # ends at window start
+        ("2026-08-03T17:00:00", "2026-08-03T18:00:00"),  # starts at window end
+        ("2026-08-03T09:00:00", "2026-08-03T10:00:00"),  # inside
+    ):
+        await client.post(
+            "/api/events", json={"task_id": task_id, "start_at": start, "end_at": end}
+        )
+
+    listed = await client.get(
+        "/api/events", params={"start": "2026-08-03T09:00:00", "end": "2026-08-03T17:00:00"}
+    )
+    assert [e["start_at"] for e in listed.json()] == ["2026-08-03T09:00:00"]
+
+
 async def test_delete_event(client):
     task_id = await _task(client)
     event_id = (

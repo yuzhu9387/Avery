@@ -57,14 +57,25 @@ async def create_event(session: AsyncSession, data: EventCreate) -> Event:
 
 
 async def update_event(session: AsyncSession, event_id: int, data: EventUpdate) -> Event | None:
+    """Validate against the PROSPECTIVE values before mutating anything.
+
+    Assigning first and checking afterwards leaves the ORM object dirty in the
+    session when the check fails: the caller gets its 422, but the next commit on
+    that same session flushes the invalid row anyway. Requests share one session,
+    so that is a real corruption path, not a theoretical one.
+    """
     event = await session.get(Event, event_id)
     if event is None:
         return None
     fields = data.model_dump(exclude_unset=True)
+
+    new_start = fields.get("start_at", event.start_at)
+    new_end = fields.get("end_at", event.end_at)
+    if new_end <= new_start:
+        raise ValueError("end_at must be after start_at")
+
     for key, value in fields.items():
         setattr(event, key, value)
-    if event.end_at <= event.start_at:
-        raise ValueError("end_at must be after start_at")
     await session.commit()
     await session.refresh(event)
     return event
