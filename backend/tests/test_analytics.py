@@ -2,7 +2,13 @@ from datetime import date, datetime, timedelta
 
 import pytest
 
-from app.services.analytics import EventSlice, evaluate, find_overlaps, split_minutes_by_day
+from app.services.analytics import (
+    EventSlice,
+    evaluate,
+    find_overlaps,
+    minutes_in_window,
+    split_minutes_by_day,
+)
 from app.services.rules import GroupSpec, RuleSpec
 
 REST, WORK, STUDY, COMMUTE, KIDS, CHORES, FITNESS, PERSONAL = 1, 2, 3, 4, 5, 6, 7, 8
@@ -48,7 +54,7 @@ def test_perfect_631_all_pass():
 
 
 def test_spec_worked_example_fitness_fails_under():
-    """From the spec: a template weekday is 10h / 5h / 1h = 62/31/6%, so C is under."""
+    """From the spec: a template weekday is 10h / 5h / 1h = 62.5/31.25/6.25%, so C is under."""
     slices = [
         slice_(1, WORK, 3, 9, 7.0),
         slice_(2, STUDY, 3, 21, 1.5),
@@ -175,3 +181,91 @@ def test_split_minutes_by_day_divides_at_midnight():
 def test_split_minutes_by_day_single_day():
     same_day = EventSlice(1, datetime(2026, 8, 3, 9), datetime(2026, 8, 3, 10, 30), (WORK,))
     assert split_minutes_by_day(same_day) == {date(2026, 8, 3): 90}
+
+
+def test_exact_band_edges_pass():
+    """The published bands are inclusive. 48 min of 600 is exactly 8.0% — group C's
+    documented floor — and 72 of 600 is exactly 12.0%, its ceiling. Both must pass.
+    Float division puts these a few ULPs outside the raw comparison."""
+    low = [slice_(1, FITNESS, 3, 5, 0.8), slice_(2, WORK, 3, 8, 9.2)]
+    assert next(g for g in evaluate(low, RULE, PERIOD_START, PERIOD_END).groups
+                if g.key == "C").verdict == "pass"
+
+    high = [slice_(1, FITNESS, 3, 5, 1.2), slice_(2, WORK, 3, 8, 8.8)]
+    assert next(g for g in evaluate(high, RULE, PERIOD_START, PERIOD_END).groups
+                if g.key == "C").verdict == "pass"
+
+
+def test_group_above_its_band_is_over():
+    """The `over` verdict had no assertion anywhere in this suite."""
+    result = evaluate([slice_(1, WORK, 3, 9, 8.0)], RULE, PERIOD_START, PERIOD_END)
+    by_key = {g.key: g for g in result.groups}
+    assert by_key["A"].share_actual == pytest.approx(1.0)
+    assert by_key["A"].verdict == "over"
+    assert by_key["C"].verdict == "under"
+
+
+def test_zero_ratio_group_holding_time_is_over_not_pass():
+    """A ratio-0 group asks for no time, so time in it overshoots. Reporting `pass`
+    would let a bucket hold a third of the week while silently diluting the rest."""
+    doomscroll = 99
+    rule = RuleSpec(
+        groups=RULE.groups + (GroupSpec("D", "Doomscroll", 0.0, (doomscroll,)),),
+        tolerance=0.2,
+        exclude_tag_ids=(REST, PERSONAL),
+    )
+    slices = [
+        slice_(1, WORK, 3, 8, 6.0),
+        slice_(2, KIDS, 3, 15, 3.0),
+        slice_(3, FITNESS, 3, 19, 1.0),
+        slice_(4, doomscroll, 4, 20, 5.0),
+    ]
+    by_key = {g.key: g for g in evaluate(slices, rule, PERIOD_START, PERIOD_END).groups}
+    assert by_key["D"].verdict == "over"
+    assert by_key["D"].minutes == 300
+
+
+def test_zero_ratio_group_with_no_time_passes():
+    rule = RuleSpec(
+        groups=RULE.groups + (GroupSpec("D", "Doomscroll", 0.0, (99,)),),
+        tolerance=0.2,
+        exclude_tag_ids=(REST, PERSONAL),
+    )
+    slices = [
+        slice_(1, WORK, 3, 8, 6.0),
+        slice_(2, KIDS, 3, 15, 3.0),
+        slice_(3, FITNESS, 3, 19, 1.0),
+    ]
+    by_key = {g.key: g for g in evaluate(slices, rule, PERIOD_START, PERIOD_END).groups}
+    assert by_key["D"].verdict == "pass"
+
+
+def test_minutes_in_window_clips_every_way():
+    def s(start_h, end_h, day=3):
+        return EventSlice(1, datetime(2026, 8, day, start_h), datetime(2026, 8, day, end_h), (WORK,))
+
+    lo, hi = datetime(2026, 8, 3, 9), datetime(2026, 8, 3, 17)
+
+    assert minutes_in_window(s(6, 8), lo, hi) == 0        # entirely before
+    assert minutes_in_window(s(18, 20), lo, hi) == 0      # entirely after
+    assert minutes_in_window(s(6, 9), lo, hi) == 0        # abuts the start
+    assert minutes_in_window(s(17, 19), lo, hi) == 0      # abuts the end
+    assert minutes_in_window(s(8, 10), lo, hi) == 60      # straddles the start
+    assert minutes_in_window(s(16, 18), lo, hi) == 60     # straddles the end
+    assert minutes_in_window(s(6, 20), lo, hi) == 480     # contains the window
+    assert minutes_in_window(s(10, 11), lo, hi) == 60     # wholly inside
+
+
+def test_to_dict_is_json_serializable():
+    """Task 7 serializes this straight to HTTP. Int tag keys must become strings,
+    overlap tuples must become lists, and no non-finite float may appear."""
+    import json
+
+    a = EventSlice(1, datetime(2026, 8, 3, 9), datetime(2026, 8, 3, 11), (WORK,))
+    b = EventSlice(2, datetime(2026, 8, 3, 10), datetime(2026, 8, 3, 12), (KIDS,))
+    payload = evaluate([a, b], RULE, PERIOD_START, PERIOD_END).to_dict()
+
+    encoded = json.dumps(payload, allow_nan=False)  # raises on inf/nan
+    assert json.loads(encoded)["minutes_by_tag"] == {str(WORK): 120, str(KIDS): 120}
+    assert json.loads(encoded)["overlaps"] == [[1, 2]]
+    assert {g["key"] for g in payload["groups"]} == {"A", "B", "C"}

@@ -13,6 +13,12 @@ PASS = "pass"
 OVER = "over"
 UNDER = "under"
 
+# `deviation` is the result of two float divisions, so a share sitting exactly on a
+# band edge lands a few ULPs outside it — 8.0% of a 6:3:1 group C computes as
+# -0.20000000000000004 against a 0.2 tolerance and would read "under" while the
+# payload printed -0.2. The bands are documented as inclusive; this makes them so.
+TOLERANCE_EPSILON = 1e-9
+
 
 @dataclass(frozen=True)
 class EventSlice:
@@ -165,7 +171,13 @@ def evaluate(
             deviation = (share_actual - share_target) / share_target
         if not total:
             verdict = UNDER
-        elif abs(deviation) <= rule.tolerance:
+        elif share_target == 0:
+            # A zero-ratio group asks for no time at all, so any time spent in it
+            # overshoots. Without this branch deviation is 0.0 and the group would
+            # report "pass" while holding a third of the week and diluting every
+            # other group's share.
+            verdict = PASS if share_actual == 0 else OVER
+        elif abs(deviation) <= rule.tolerance + TOLERANCE_EPSILON:
             verdict = PASS
         else:
             verdict = OVER if deviation > 0 else UNDER
