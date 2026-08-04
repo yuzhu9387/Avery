@@ -2403,6 +2403,32 @@ async def test_evaluate_without_rule_returns_409(client):
     assert result.status_code == 409
 
 
+async def test_unknown_rule_id_is_404_not_409(client):
+    """409 means "you have no rule at all". Saying that to a client whose rule_id
+    is merely typo'd sends them chasing a problem they do not have."""
+    await _setup(client)
+    result = await client.post(
+        "/api/analytics/evaluate",
+        json={
+            "period_start": "2026-08-01T00:00:00",
+            "period_end": "2026-09-01T00:00:00",
+            "rule_id": 9999,
+        },
+    )
+    assert result.status_code == 404
+
+
+async def test_inverted_period_is_422_not_a_false_under(client):
+    """A reversed range must not return 200 with every group "under" — that is
+    indistinguishable from a month where nothing was logged."""
+    await _setup(client)
+    result = await client.post(
+        "/api/analytics/evaluate",
+        json={"period_start": "2026-09-01T00:00:00", "period_end": "2026-08-01T00:00:00"},
+    )
+    assert result.status_code == 422
+
+
 async def test_evaluate_with_explicit_rule_id(client):
     await _setup(client)
     rule_id = (await client.get("/api/rules/active")).json()["id"]
@@ -2442,6 +2468,14 @@ class NoActiveRule(Exception):
     """Raised when an evaluation is requested but no rule has ever been created."""
 
 
+class RuleNotFound(Exception):
+    """Raised when an explicit rule_id names a rule that does not exist.
+
+    Distinct from NoActiveRule on purpose: telling a client with a typo'd rule_id
+    to "create a rule first" sends them chasing a problem they do not have.
+    """
+
+
 def to_slice(event: Event) -> EventSlice:
     return EventSlice(
         id=event.id,
@@ -2459,10 +2493,12 @@ async def evaluate_period(
 ) -> tuple[Evaluation, Rule]:
     if rule_id is None:
         rule = await rule_service.get_active_rule(session)
+        if rule is None:
+            raise NoActiveRule()
     else:
         rule = await rule_service.get_rule(session, rule_id)
-    if rule is None:
-        raise NoActiveRule()
+        if rule is None:
+            raise RuleNotFound(rule_id)
 
     rows = await event_service.list_events(session, start=period_start, end=period_end)
     slices = [to_slice(e) for e in rows]
@@ -2475,7 +2511,7 @@ async def evaluate_period(
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
@@ -2490,6 +2526,14 @@ class EvaluateRequest(BaseModel):
     period_end: datetime
     rule_id: int | None = None
 
+    @model_validator(mode="after")
+    def check_period(self) -> "EvaluateRequest":
+        # Without this, a reversed range returns 200 with every group "under" —
+        # a payload indistinguishable from a month in which nothing was logged.
+        if self.period_end <= self.period_start:
+            raise ValueError("period_end must be after period_start")
+        return self
+
 
 @router.post("/evaluate")
 async def evaluate_period(
@@ -2501,6 +2545,8 @@ async def evaluate_period(
         )
     except service.NoActiveRule:
         raise HTTPException(status.HTTP_409_CONFLICT, "no active rule — create one first")
+    except service.RuleNotFound:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"rule {body.rule_id} not found")
     return {
         "period_start": body.period_start,
         "period_end": body.period_end,
@@ -2520,7 +2566,7 @@ app.include_router(analytics_router.router)
 - [ ] **Step 6: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (57 tests)
+Expected: PASS (59 tests)
 
 - [ ] **Step 7: Commit**
 
@@ -3048,7 +3094,7 @@ app.include_router(templates_router.week_router)
 - [ ] **Step 9: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (66 tests)
+Expected: PASS (68 tests)
 
 - [ ] **Step 10: Commit**
 
@@ -3327,7 +3373,7 @@ Register this **after** `templates_router.week_router` — both use the `/api/we
 - [ ] **Step 6: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (75 tests)
+Expected: PASS (77 tests)
 
 - [ ] **Step 7: Commit**
 
@@ -3702,7 +3748,7 @@ app.include_router(reports_router.router)
 - [ ] **Step 9: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (84 tests)
+Expected: PASS (86 tests)
 
 - [ ] **Step 10: Commit**
 
@@ -4086,7 +4132,7 @@ app.include_router(reminders_router.router)
 - [ ] **Step 9: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (92 tests)
+Expected: PASS (94 tests)
 
 - [ ] **Step 10: Commit**
 
@@ -4343,7 +4389,7 @@ app.include_router(seed_router.router)
 - [ ] **Step 6: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (97 tests)
+Expected: PASS (99 tests)
 
 If `test_seeded_week_materializes_and_matches_631_shape` reports A/B verdicts other than `pass`, the seed block times are wrong — recheck them against the table in Step 3 before changing the analytics engine. The engine is proven by Task 6's tests.
 
@@ -4561,7 +4607,7 @@ app = FastAPI(title="Avery", version="0.1.0", lifespan=lifespan)
 - [ ] **Step 5: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (102 tests)
+Expected: PASS (104 tests)
 
 - [ ] **Step 6: Verify the server actually boots**
 
@@ -4693,7 +4739,7 @@ Creates the eight tags, the 6:3:1 rule, and the default weekly template.
 - [ ] **Step 6: Run the full suite one last time**
 
 Run: `cd backend && .venv/bin/pytest -v`
-Expected: PASS (102 tests)
+Expected: PASS (104 tests)
 
 - [ ] **Step 7: Commit**
 
