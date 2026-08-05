@@ -3297,6 +3297,38 @@ async def test_month_payload_covers_every_day(client):
 
 async def test_bad_month_format_returns_422(client):
     assert (await client.get("/api/months/2026-13")).status_code == 422
+    # "0000-01" satisfies the regex but date(0, ...) raises — must still be 422.
+    assert (await client.get("/api/months/0000-01")).status_code == 422
+
+
+async def test_untagged_events_still_count_toward_total_minutes(client):
+    """total_minutes must not be derived from the per-tag buckets — untagged events
+    would contribute nothing and the cell would read "1 event, 0 minutes"."""
+    await client.post(
+        "/api/events",
+        json={
+            "task_name": "Untagged block",
+            "start_at": "2026-08-03T09:00:00",
+            "end_at": "2026-08-03T16:00:00",
+            "tag_ids": [],
+        },
+    )
+    days = {d["date"]: d for d in (await client.get("/api/months/2026-08")).json()["days"]}
+    cell = days["2026-08-03"]
+    assert cell["event_count"] == 1
+    assert cell["total_minutes"] == 420
+    assert cell["minutes_by_tag"] == {}
+
+
+async def test_materialized_is_false_when_the_template_creates_nothing(client):
+    """An active template with no block matching this week legitimately creates
+    zero events. Reporting materialized: true there tells the UI a lie."""
+    await client.post("/api/templates", json={"name": "Empty"})
+    monday = _this_monday()
+
+    body = (await client.get(f"/api/weeks/{monday.isoformat()}")).json()
+    assert body["events"] == []
+    assert body["materialized"] is False
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -3337,12 +3369,16 @@ async def get_week(
 
     if not rows and allow_materialize and _is_materializable(monday):
         try:
-            await template_service.materialize_week(session, monday)
+            _, created, _ = await template_service.materialize_week(session, monday)
         except template_service.NoActiveTemplate:
             pass
         else:
-            materialized = True
-            rows = await event_service.list_events(session, start=start, end=end)
+            # `materialized` must mean "events were created", not merely "no exception
+            # was raised". A template with no blocks matching this week legitimately
+            # creates nothing, and reporting true there tells the UI a lie.
+            materialized = bool(created)
+            if created:
+                rows = await event_service.list_events(session, start=start, end=end)
 
     return {
         "week_start": monday.isoformat(),
@@ -3365,6 +3401,7 @@ async def get_month(session: AsyncSession, year: int, month: int) -> dict:
 
     per_day: dict[date, dict[int, int]] = {}
     counts: dict[date, int] = {}
+    totals: dict[date, int] = {}
     for row in rows:
         slice_ = EventSlice(
             id=row.id, start_at=row.start_at, end_at=row.end_at, tag_ids=tuple(row.tag_ids)
@@ -3374,6 +3411,10 @@ async def get_month(session: AsyncSession, year: int, month: int) -> dict:
             if not (first <= day < last_exclusive):
                 continue
             counts[day] = counts.get(day, 0) + 1
+            # Accumulate the day's total independently of the per-tag buckets.
+            # Deriving it from those buckets drops every untagged event's minutes,
+            # producing day cells that read "1 event, 0 minutes".
+            totals[day] = totals.get(day, 0) + minutes
             if tag_id is None:
                 continue
             bucket = per_day.setdefault(day, {})
@@ -3387,7 +3428,7 @@ async def get_month(session: AsyncSession, year: int, month: int) -> dict:
             {
                 "date": day.isoformat(),
                 "event_count": counts.get(day, 0),
-                "total_minutes": sum(minutes_by_tag.values()),
+                "total_minutes": totals.get(day, 0),
                 "minutes_by_tag": {str(k): v for k, v in sorted(minutes_by_tag.items())},
             }
         )
@@ -3433,6 +3474,10 @@ async def get_month(month_key: str, session: AsyncSession = Depends(get_session)
     year, month = int(match.group(1)), int(match.group(2))
     if not 1 <= month <= 12:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "month must be 01-12")
+    # "0000-01" satisfies the regex but date(0, ...) raises, turning a malformed
+    # key into a 500 on an endpoint whose whole contract is to 422 on bad input.
+    if not 1 <= year <= 9999:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "year must be 0001-9999")
     return await service.get_month(session, year, month)
 ```
 
@@ -3450,7 +3495,7 @@ Register this **after** `templates_router.week_router` — both use the `/api/we
 - [ ] **Step 6: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (79 tests)
+Expected: PASS (82 tests)
 
 - [ ] **Step 7: Commit**
 
@@ -3825,7 +3870,7 @@ app.include_router(reports_router.router)
 - [ ] **Step 9: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (88 tests)
+Expected: PASS (91 tests)
 
 - [ ] **Step 10: Commit**
 
@@ -4209,7 +4254,7 @@ app.include_router(reminders_router.router)
 - [ ] **Step 9: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (96 tests)
+Expected: PASS (99 tests)
 
 - [ ] **Step 10: Commit**
 
@@ -4466,7 +4511,7 @@ app.include_router(seed_router.router)
 - [ ] **Step 6: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (101 tests)
+Expected: PASS (104 tests)
 
 If `test_seeded_week_materializes_and_matches_631_shape` reports A/B verdicts other than `pass`, the seed block times are wrong — recheck them against the table in Step 3 before changing the analytics engine. The engine is proven by Task 6's tests.
 
@@ -4684,7 +4729,7 @@ app = FastAPI(title="Avery", version="0.1.0", lifespan=lifespan)
 - [ ] **Step 5: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (106 tests)
+Expected: PASS (109 tests)
 
 - [ ] **Step 6: Verify the server actually boots**
 
@@ -4816,7 +4861,7 @@ Creates the eight tags, the 6:3:1 rule, and the default weekly template.
 - [ ] **Step 6: Run the full suite one last time**
 
 Run: `cd backend && .venv/bin/pytest -v`
-Expected: PASS (106 tests)
+Expected: PASS (109 tests)
 
 - [ ] **Step 7: Commit**
 
