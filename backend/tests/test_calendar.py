@@ -87,8 +87,8 @@ async def test_month_payload_rolls_minutes_per_day_per_tag(client):
     )
     body = (await client.get("/api/months/2026-08")).json()
     days = {d["date"]: d for d in body["days"]}
-    assert days["2026-08-03"]["minutes_by_tag"][str(tag_id)] == 60
-    assert days["2026-08-04"]["minutes_by_tag"][str(tag_id)] == 420
+    assert days["2026-08-03"]["minutes_by_primary_tag"][str(tag_id)] == 60
+    assert days["2026-08-04"]["minutes_by_primary_tag"][str(tag_id)] == 420
 
 
 async def test_month_payload_covers_every_day(client):
@@ -120,7 +120,7 @@ async def test_untagged_events_still_count_toward_total_minutes(client):
     cell = days["2026-08-03"]
     assert cell["event_count"] == 1
     assert cell["total_minutes"] == 420
-    assert cell["minutes_by_tag"] == {}
+    assert cell["minutes_by_primary_tag"] == {}
 
 
 async def test_materialized_is_false_when_the_template_creates_nothing(client):

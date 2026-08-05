@@ -212,3 +212,42 @@ async def test_block_rejects_an_unknown_tag_id(client):
         },
     )
     assert bad.status_code == 422
+
+
+async def test_rename_and_deactivate_a_template(client):
+    template_id = (await client.post("/api/templates", json={"name": "Old"})).json()["id"]
+
+    renamed = await client.patch(f"/api/templates/{template_id}", json={"name": "New"})
+    assert renamed.status_code == 200
+    assert renamed.json()["name"] == "New"
+
+    off = await client.patch(f"/api/templates/{template_id}", json={"is_active": False})
+    assert off.json()["is_active"] is False
+    assert (await client.get("/api/templates/active")).status_code == 404
+
+
+async def test_partial_block_patch_leaves_other_fields_alone(client):
+    template_id = await _template(client, [WEEKDAY_BLOCK])
+    block = (await client.get(f"/api/templates/{template_id}")).json()["blocks"][0]
+
+    patched = await client.patch(
+        f"/api/template-blocks/{block['id']}", json={"task_name": "Deep work"}
+    )
+    assert patched.status_code == 200
+    assert patched.json()["task_name"] == "Deep work"
+    assert patched.json()["days"] == block["days"]
+    assert patched.json()["start_time"] == block["start_time"]
+
+
+async def test_preview_does_not_write_anything(client):
+    """The Template editor's "Preview next week" must be a pure read."""
+    await _template(client, [WEEKDAY_BLOCK])
+
+    preview = await client.get("/api/templates/active/preview/2026-08-03")
+    assert preview.status_code == 200
+    body = preview.json()
+    assert body["week_start"] == "2026-08-03"
+    assert len(body["events"]) == 5
+    assert body["events"][0]["start_at"] == "2026-08-03T09:30:00"
+
+    assert (await client.get("/api/events")).json() == []

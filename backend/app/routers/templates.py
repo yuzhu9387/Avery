@@ -6,10 +6,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_session
 from app.schemas.template import (
     MaterializeResult,
+    PreviewResult,
     TemplateBlockCreate,
     TemplateBlockOut,
+    TemplateBlockUpdate,
     TemplateCreate,
     TemplateOut,
+    TemplateUpdate,
 )
 from app.services import tags as tag_service
 from app.services import templates as service
@@ -37,9 +40,37 @@ async def get_active_template(session: AsyncSession = Depends(get_session)):
     return template
 
 
+@router.get("/{template_ref}/preview/{any_day}", response_model=PreviewResult)
+async def preview_week(
+    template_ref: str, any_day: date, session: AsyncSession = Depends(get_session)
+):
+    if template_ref == "active":
+        template = await service.get_active_template(session)
+    elif template_ref.isdigit():
+        template = await service.get_template(session, int(template_ref))
+    else:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "expected an id or 'active'")
+    if template is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "template not found")
+
+    result = await service.preview_week(session, any_day, template)
+    monday, rows = result
+    return PreviewResult(week_start=monday.isoformat(), events=rows)
+
+
 @router.get("/{template_id}", response_model=TemplateOut)
 async def get_template(template_id: int, session: AsyncSession = Depends(get_session)):
     template = await service.get_template(session, template_id)
+    if template is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "template not found")
+    return template
+
+
+@router.patch("/{template_id}", response_model=TemplateOut)
+async def update_template(
+    template_id: int, data: TemplateUpdate, session: AsyncSession = Depends(get_session)
+):
+    template = await service.update_template(session, template_id, data)
     if template is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "template not found")
     return template
@@ -71,7 +102,7 @@ async def create_block(
 
 @block_router.patch("/{block_id}", response_model=TemplateBlockOut)
 async def update_block(
-    block_id: int, data: TemplateBlockCreate, session: AsyncSession = Depends(get_session)
+    block_id: int, data: TemplateBlockUpdate, session: AsyncSession = Depends(get_session)
 ):
     try:
         block = await service.update_block(session, block_id, data)

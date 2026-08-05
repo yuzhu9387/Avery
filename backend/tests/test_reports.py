@@ -58,7 +58,18 @@ async def test_changing_the_rule_leaves_old_reports_untouched(client):
     await client.post("/api/rules", json=loosened)
 
     refetched = (await client.get(f"/api/reports/{original['id']}")).json()
-    assert refetched == original
+    # The report row itself is untouched: same rule_id, metrics, narrative, etc.
+    # `rule` is a live join on that id, not a frozen copy, so its `effective_to`
+    # legitimately flips once create_rule_version closes the superseded rule —
+    # that is the rule row changing, not the report.
+    assert {k: v for k, v in refetched.items() if k != "rule"} == {
+        k: v for k, v in original.items() if k != "rule"
+    }
+    assert refetched["rule"]["id"] == original["rule"]["id"]
+    assert refetched["rule"]["name"] == original["rule"]["name"]
+    assert refetched["rule"]["groups"] == original["rule"]["groups"]
+    assert original["rule"]["effective_to"] is None
+    assert refetched["rule"]["effective_to"] is not None
 
 
 async def test_new_report_uses_the_now_current_rule(client):
@@ -132,3 +143,14 @@ async def test_deleting_an_unreferenced_rule_still_works(client):
     await client.post("/api/rules", json={**RULE_BODY, "name": "successor"})
 
     assert (await client.delete(f"/api/rules/{superseded_id}")).status_code == 204
+
+
+async def test_report_embeds_the_rule_it_snapshotted(client):
+    """The Review header must name the rule version without an N+1 fetch."""
+    await _setup(client)
+    report = (await client.post("/api/reports/run", json={"month": "2026-08"})).json()
+
+    assert report["rule"]["id"] == report["rule_id"]
+    assert report["rule"]["name"] == "6:3:1 baseline"
+    assert [g["ratio"] for g in report["rule"]["groups"]] == [6, 3, 1]
+    assert report["rule"]["effective_from"] is not None

@@ -88,7 +88,7 @@ async def get_month(session: AsyncSession, year: int, month: int) -> dict:
                 "date": day.isoformat(),
                 "event_count": counts.get(day, 0),
                 "total_minutes": totals.get(day, 0),
-                "minutes_by_tag": {str(k): v for k, v in sorted(minutes_by_tag.items())},
+                "minutes_by_primary_tag": {str(k): v for k, v in sorted(minutes_by_tag.items())},
             }
         )
 

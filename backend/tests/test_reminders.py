@@ -106,29 +106,30 @@ async def test_archiving_a_task_preserves_its_reminders(client, session):
     ON DELETE CASCADE from tasks to reminders is no longer reachable through this
     route at all — archiving must not touch the reminder rows.
 
-    This replaces a test that asserted the opposite (hard delete cascading away the
-    reminder) back when the route actually issued a hard delete. The FK pragma and
-    the cascade itself are still real; they are just exercised at the ORM level now,
-    not through this endpoint. See test_events.py for the identical change to the
-    task -> events cascade test, made for the same reason.
-
-    After archiving, the reminder rows are preserved in the database (not cascaded),
-    but they should not fire in list_due or list_reminders queries.
+    The reminder row itself survives archiving (dormant, not deleted): it is still
+    fetchable directly from the database via a session.get, even though it drops out
+    of `list_due`. That is the distinction this test name promises and
+    `test_archived_task_reminders_do_not_fire` — which only checks the API-level
+    surfaces (`list_due` and `GET /api/reminders`) — does not cover.
     """
     from datetime import datetime
 
+    from app.models import Reminder
+
     task_id = await _task(client)
-    await client.post(
-        "/api/reminders", json={"task_id": task_id, "remind_at": "2026-08-01T09:00:00"}
-    )
+    reminder_id = (
+        await client.post(
+            "/api/reminders", json={"task_id": task_id, "remind_at": "2026-08-01T09:00:00"}
+        )
+    ).json()["id"]
     assert len(await service.list_due(session, datetime(2026, 8, 10, 12, 0))) == 1
 
     archived = await client.delete(f"/api/tasks/{task_id}")
     assert archived.status_code == 200
     assert archived.json()["status"] == "archived"
 
+    assert await session.get(Reminder, reminder_id) is not None
     assert len(await service.list_due(session, datetime(2026, 8, 10, 12, 0))) == 0
-    assert len((await client.get("/api/reminders")).json()) == 0
 
 
 async def test_archived_task_reminders_do_not_fire(client, session):

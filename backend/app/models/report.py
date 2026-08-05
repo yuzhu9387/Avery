@@ -1,9 +1,10 @@
 from datetime import date, datetime
 
 from sqlalchemy import JSON, Date, DateTime, ForeignKey, Integer, Text
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
+from app.models.rule import Rule
 
 
 class Report(Base):
@@ -18,3 +19,7 @@ class Report(Base):
     metrics: Mapped[dict] = mapped_column(JSON, nullable=False)
     narrative: Mapped[str] = mapped_column(Text, default="", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, nullable=False)
+
+    # lazy="selectin" matters: without it, the async serializer raises MissingGreenlet
+    # when ReportOut accesses `.rule` outside the greenlet that can do IO.
+    rule: Mapped["Rule"] = relationship(lazy="selectin")

@@ -5,7 +5,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Event, Task, Template, TemplateBlock
 from app.models.event import EventSource
-from app.schemas.template import TemplateBlockCreate, TemplateCreate
+from app.schemas.template import (
+    TemplateBlockCreate,
+    TemplateBlockUpdate,
+    TemplateCreate,
+    TemplateUpdate,
+)
 from app.services import events as event_service
 from app.services import tags as tag_service
 from app.services import tasks as task_service
@@ -56,6 +61,18 @@ async def create_template(session: AsyncSession, data: TemplateCreate) -> Templa
     return template
 
 
+async def update_template(
+    session: AsyncSession, template_id: int, data: TemplateUpdate
+) -> Template | None:
+    template = await session.get(Template, template_id)
+    if template is None:
+        return None
+    for key, value in data.model_dump(exclude_unset=True).items():
+        setattr(template, key, value)
+    await session.commit()
+    return await get_template(session, template_id)
+
+
 async def delete_template(session: AsyncSession, template_id: int) -> bool:
     template = await session.get(Template, template_id)
     if template is None:
@@ -79,13 +96,15 @@ async def create_block(
 
 
 async def update_block(
-    session: AsyncSession, block_id: int, data: TemplateBlockCreate
+    session: AsyncSession, block_id: int, data: TemplateBlockUpdate
 ) -> TemplateBlock | None:
     block = await session.get(TemplateBlock, block_id)
     if block is None:
         return None
-    await tag_service.assert_tags_exist(session, data.tag_ids)
-    for key, value in data.model_dump().items():
+    fields = data.model_dump(exclude_unset=True)
+    if "tag_ids" in fields:
+        await tag_service.assert_tags_exist(session, fields["tag_ids"])
+    for key, value in fields.items():
         setattr(block, key, value)
     await session.commit()
     await session.refresh(block)
@@ -121,6 +140,48 @@ async def _days_with_events(session: AsyncSession, monday: date, next_monday: da
             if monday <= day < next_monday:
                 occupied.add(day)
     return occupied
+
+
+async def preview_week(
+    session: AsyncSession, any_day: date, template: Template | None = None
+) -> tuple[date, list[dict]] | None:
+    """What materialize_week WOULD create, without writing anything.
+
+    Deliberately shares the day/block selection and the midnight-wrap arithmetic with
+    materialize_week rather than reimplementing it — a preview that disagrees with what
+    actually gets created is worse than no preview.
+    """
+    if template is None:
+        template = await get_active_template(session)
+    if template is None:
+        return None
+
+    monday, next_monday = week_bounds(any_day)
+    occupied = await _days_with_events(session, monday, next_monday)
+
+    rows: list[dict] = []
+    for offset in range(7):
+        day = monday + timedelta(days=offset)
+        if day in occupied:
+            continue
+        for block in template.blocks:
+            if day.isoweekday() not in block.days:
+                continue
+            start = datetime.combine(day, block.start_time)
+            end = datetime.combine(day, block.end_time)
+            if end <= start:
+                end += timedelta(days=1)
+            rows.append(
+                {
+                    "task_name": block.task_name,
+                    "start_at": start.isoformat(timespec="seconds"),
+                    "end_at": end.isoformat(timespec="seconds"),
+                    "tag_ids": list(block.tag_ids),
+                    "template_block_id": block.id,
+                }
+            )
+    rows.sort(key=lambda r: r["start_at"])
+    return monday, rows
 
 
 async def materialize_week(

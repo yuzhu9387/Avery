@@ -2,6 +2,8 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.schemas.rule import RuleOut
+
 
 class ReportRun(BaseModel):
     month: str = Field(pattern=r"^\d{4}-\d{2}$")
@@ -14,6 +16,7 @@ class ReportOut(BaseModel):
     period_start: date
     period_end: date
     rule_id: int
+    rule: RuleOut
     metrics: dict
     narrative: str
     created_at: datetime
