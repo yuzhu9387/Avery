@@ -3,6 +3,7 @@ from datetime import date, datetime
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.models.task import Priority, TaskStatus
+from app.schemas.event import EventOut
 
 
 class TaskCreate(BaseModel):
@@ -50,3 +51,13 @@ class TaskOut(BaseModel):
     priority: Priority
     created_at: datetime
     completed_at: datetime | None
+
+
+class TaskStats(BaseModel):
+    task_id: int
+    minutes_this_week: int
+    minutes_this_month: int
+    minutes_all_time: int
+    event_count: int
+    upcoming: list[EventOut]
+    recent: list[EventOut]

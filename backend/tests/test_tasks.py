@@ -151,6 +151,65 @@ async def test_find_or_create_skips_an_archived_task(client, session):
     assert second.status == "todo"
 
 
+async def test_task_stats_rolls_hours_and_occurrences(client):
+    tag_id = (
+        await client.post("/api/tags", json={"name": "W", "color": "#DA96A4"})
+    ).json()["id"]
+    task_id = (
+        await client.post("/api/tasks", json={"name": "Work", "tag_ids": [tag_id]})
+    ).json()["id"]
+    for day, hours in (("2026-08-03", 2), ("2026-08-04", 3), ("2026-09-01", 4)):
+        await client.post(
+            "/api/events",
+            json={
+                "task_id": task_id,
+                "start_at": f"{day}T09:00:00",
+                "end_at": f"{day}T{9 + hours:02d}:00:00",
+            },
+        )
+
+    stats = await client.get(f"/api/tasks/{task_id}/stats", params={"today": "2026-08-05"})
+    assert stats.status_code == 200
+    body = stats.json()
+    assert body["minutes_all_time"] == 9 * 60
+    assert body["minutes_this_week"] == 5 * 60   # Mon 3rd + Tue 4th, week of Aug 3
+    assert body["minutes_this_month"] == 5 * 60  # September's 4h is a different month
+    assert body["event_count"] == 3
+    assert len(body["upcoming"]) == 1            # Sep 1 is after Aug 5
+    assert body["upcoming"][0]["start_at"] == "2026-09-01T09:00:00"
+    assert len(body["recent"]) == 2
+
+
+async def test_task_stats_404s_for_a_missing_task(client):
+    assert (await client.get("/api/tasks/999/stats")).status_code == 404
+
+
+async def test_floating_only_excludes_tasks_that_have_events(client):
+    """`is_floating` alone is not the Floating list: a floating task that has since
+    been scheduled belongs under Scheduled."""
+    bare = (
+        await client.post(
+            "/api/tasks", json={"name": "Renew passport", "tag_ids": [], "is_floating": True}
+        )
+    ).json()["id"]
+    scheduled = (
+        await client.post(
+            "/api/tasks", json={"name": "Dentist", "tag_ids": [], "is_floating": True}
+        )
+    ).json()["id"]
+    await client.post(
+        "/api/events",
+        json={
+            "task_id": scheduled,
+            "start_at": "2026-08-05T15:00:00",
+            "end_at": "2026-08-05T16:00:00",
+        },
+    )
+
+    ids = [t["id"] for t in (await client.get("/api/tasks", params={"floating_only": True})).json()]
+    assert ids == [bare]
+
+
 async def test_task_rejects_an_unknown_tag_id(client):
     """Events and rules already validate tag ids. Tasks did not, and an event with
     no tags inherits the task's — so the bad id arrived by the back door."""

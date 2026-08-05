@@ -1,12 +1,15 @@
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Task
+from app.models import Event, Task
 from app.models.task import TaskStatus
 from app.schemas.task import TaskCreate, TaskUpdate
+from app.services import analytics
+from app.services import events as event_service
 from app.services import tags as tag_service
+from app.services import templates as template_service
 
 
 async def list_tasks(
@@ -14,6 +17,7 @@ async def list_tasks(
     *,
     status: TaskStatus | None = None,
     is_floating: bool | None = None,
+    floating_only: bool = False,
     include_archived: bool = False,
 ) -> list[Task]:
     stmt = select(Task).order_by(Task.created_at.desc(), Task.id.desc())
@@ -21,6 +25,13 @@ async def list_tasks(
         stmt = stmt.where(Task.status == status)
     if is_floating is not None:
         stmt = stmt.where(Task.is_floating.is_(is_floating))
+    if floating_only:
+        # The real Floating list: flagged floating AND not yet scheduled. A floating
+        # task that has since been given events belongs under Scheduled.
+        stmt = stmt.where(
+            Task.is_floating.is_(True),
+            ~Task.id.in_(select(Event.task_id)),
+        )
     if not include_archived and status != TaskStatus.ARCHIVED:
         stmt = stmt.where(Task.status != TaskStatus.ARCHIVED)
     return list((await session.scalars(stmt)).all())
@@ -28,6 +39,52 @@ async def list_tasks(
 
 async def get_task(session: AsyncSession, task_id: int) -> Task | None:
     return await session.get(Task, task_id)
+
+
+async def task_stats(
+    session: AsyncSession, task_id: int, today: date | None = None
+) -> dict | None:
+    """Hour rollups and the occurrence lists the Task detail page shows.
+
+    `today` is injectable so the result is testable without patching the clock; it
+    defaults to the real current date.
+    """
+    task = await session.get(Task, task_id)
+    if task is None:
+        return None
+
+    anchor = today or date.today()
+    week_start, week_end = template_service.week_bounds(anchor)
+    month_start = anchor.replace(day=1)
+    month_end = date(
+        anchor.year + (anchor.month == 12), (anchor.month % 12) + 1, 1
+    )
+    now = datetime.combine(anchor, datetime.min.time())
+
+    rows = await event_service.list_events(session, task_id=task_id)
+
+    def minutes_within(lo: date, hi: date) -> int:
+        return sum(
+            analytics.minutes_in_window(
+                analytics.EventSlice(e.id, e.start_at, e.end_at, tuple(e.tag_ids)),
+                datetime.combine(lo, datetime.min.time()),
+                datetime.combine(hi, datetime.min.time()),
+            )
+            for e in rows
+        )
+
+    upcoming = [e for e in rows if e.start_at >= now][:10]
+    recent = [e for e in reversed(rows) if e.start_at < now][:10]
+
+    return {
+        "task_id": task_id,
+        "minutes_this_week": minutes_within(week_start, week_end),
+        "minutes_this_month": minutes_within(month_start, month_end),
+        "minutes_all_time": sum(e.duration_minutes for e in rows),
+        "event_count": len(rows),
+        "upcoming": upcoming,
+        "recent": recent,
+    }
 
 
 async def create_task(session: AsyncSession, data: TaskCreate) -> Task:
