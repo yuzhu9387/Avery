@@ -15,7 +15,8 @@
 ## Global Constraints
 
 - **Backend baseline: 133 tests passing.** Every backend task in Phase A must leave the suite green and growing. Run it as `arch -arm64 .venv/bin/python -m pytest tests/ -q` from `Avery/backend` — this venv's interpreter is a universal binary while the wheels are `arm64`, so an `ImportError: ... incompatible architecture` is a launch artifact, never a code failure.
-- **Frontend lives at `Avery/frontend/`.** It talks to `http://localhost:8000` in dev; the backend already allows that origin via CORS.
+- **Frontend lives at `Avery/frontend/`.** The client only ever calls relative `/api/...` paths; Vite's dev server proxies those to the backend at `http://127.0.0.1:8001`, so the browser sees same-origin and CORS never enters the picture.
+- **The backend runs on port 8001, not 8000.** A Docker container on this machine holds `*:8000` on the IPv6 wildcard and answers there, so a backend started on 8000 is shadowed and the proxy silently reaches the wrong application. Use `127.0.0.1` rather than `localhost` in the proxy target for the same reason — `localhost` resolves to IPv6 first here.
 - **No business logic in the client.** Ratios, hour rollups, verdicts, and band arithmetic come from the API. The client formats and positions; it does not compute. Where a number is missing from an endpoint, add the endpoint (Phase A) rather than computing it in React.
 - **All datetimes are naive local strings** of the form `YYYY-MM-DDTHH:MM:SS`, exactly as the backend emits and accepts. Never send a `Z` suffix or an offset, and never round-trip through `toISOString()`, which converts to UTC. Use the `formatLocal` helper from Task 5 for every outbound datetime.
 - **Tag colours come from the database**, never hardcoded. Components read `tag.color`. The palette tokens are for chrome only.
@@ -739,7 +740,7 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
     port: 5173,
-    proxy: { '/api': 'http://localhost:8000' },
+    proxy: { '/api': 'http://127.0.0.1:8001' },
   },
   test: { environment: 'node' },
 })
@@ -2232,7 +2233,7 @@ git commit -m "feat: add the review page with group charts and honest data warni
 
 - [ ] **Step 2: Write `frontend/README.md`**
 
-Cover: `npm install`; `npm run dev` on 5173 proxying `/api` to 8000; that the backend must be running and seeded first; `npx vitest run` for the geometry and drag suites; and that the palette lives only in `src/theme.css`.
+Cover: `npm install`; `npm run dev` on 5173 proxying `/api` to 8001; that the backend must be running on 8001 and seeded first; `npx vitest run` for the geometry and drag suites; and that the palette lives only in `src/theme.css`.
 
 - [ ] **Step 3: Cross-link the backend README**
 
