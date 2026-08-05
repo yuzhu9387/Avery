@@ -1,0 +1,32 @@
+/* 春山景别 — the only place a colour is defined. */
+:root {
+  --bg: #f3f1e7;
+  --surface: #fbfaf4;
+  --surface-raised: #ffffff;
+
+  --ink: #0b0505;
+  --ink-muted: #6b6560;
+  --ink-faint: #9b958e;
+  --line: #e3e0d2;
+  --line-strong: #cfcbb8;
+
+  /* palette, also the seeded tag colours */
+  --pale: #dedecf;
+  --blush: #e7c8c8;
+  --sage: #bdbd9b;
+  --clay: #c9a88f;
+  --rose: #da96a4;
+  --rose-deep: #c97b8b;
+  --teal: #8fa8a2;
+
+  --pass: #8fa8a2;
+  --over: #c97b8b;
+  --under: #c9a88f;
+
+  --radius: 12px;
+  --radius-sm: 8px;
+  --shadow-card: 0 1px 2px rgb(11 5 5 / 0.04), 0 8px 24px rgb(11 5 5 / 0.04);
+
+  --font-display: 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Helvetica Neue', sans-serif;
+}
