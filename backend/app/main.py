@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.routers import analytics as analytics_router
+from app.routers import calendar as calendar_router
 from app.routers import events as events_router
 from app.routers import rules as rules_router
 from app.routers import tags as tags_router
@@ -26,6 +27,8 @@ app.include_router(analytics_router.router)
 app.include_router(templates_router.router)
 app.include_router(templates_router.block_router)
 app.include_router(templates_router.week_router)
+app.include_router(calendar_router.week_router)
+app.include_router(calendar_router.month_router)
 
 
 @app.get("/api/health")
