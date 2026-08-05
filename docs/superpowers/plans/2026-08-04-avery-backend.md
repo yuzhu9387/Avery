@@ -4450,6 +4450,39 @@ async def test_seeded_template_matches_the_source_grid(client):
     assert any(b["task_name"] == "Personal time" and b["days"] == [6] for b in blocks)
 
 
+async def test_reseed_with_a_renamed_seed_tag_is_409_not_500(client):
+    """A seed tag can be renamed, and the rule/template lookup would then find
+    nothing. That must be a clear 409, not an unhandled KeyError."""
+    await client.post("/api/seed")
+    tags = {t["name"]: t["id"] for t in (await client.get("/api/tags")).json()}
+    rule_id = (await client.get("/api/rules/active")).json()["id"]
+    template_id = (await client.get("/api/templates/active")).json()["id"]
+
+    assert (await client.delete(f"/api/rules/{rule_id}")).status_code == 204
+    assert (await client.delete(f"/api/templates/{template_id}")).status_code == 204
+    await client.patch(f"/api/tags/{tags['Rest']}", json={"name": "Sleep"})
+
+    again = await client.post("/api/seed")
+    assert again.status_code == 409
+    assert "Rest" in again.json()["detail"]
+
+
+async def test_reseed_succeeds_when_a_seed_tag_is_merely_archived(client):
+    """Archiving IS this app's delete, so the row still exists and its id must still
+    resolve. A re-seed must succeed and keep referencing the archived tag."""
+    await client.post("/api/seed")
+    tags = {t["name"]: t["id"] for t in (await client.get("/api/tags")).json()}
+    rule_id = (await client.get("/api/rules/active")).json()["id"]
+
+    assert (await client.delete(f"/api/rules/{rule_id}")).status_code == 204
+    assert (await client.delete(f"/api/tags/{tags['Personal']}")).status_code == 200
+
+    again = await client.post("/api/seed")
+    assert again.status_code == 200
+    assert again.json()["rules"] == 1
+    assert tags["Personal"] in (await client.get("/api/rules/active")).json()["exclude_tag_ids"]
+
+
 async def test_seeded_week_materializes_and_matches_631_shape(client):
     """Seed, materialize a week, and confirm the analytics engine reads it as the spec predicts."""
     await client.post("/api/seed")
@@ -4533,6 +4566,19 @@ SEED_BLOCKS: list[tuple[list[int], time, time, str, str]] = [
 ]
 
 
+class SeedTagsMissing(Exception):
+    """A tag the seed rule or template must reference is absent.
+
+    Reachable in normal use: `DELETE /api/tags/{id}` archives rather than removes, and
+    a tag can be renamed. If the rule or template then needs re-seeding, the lookup has
+    nothing to resolve — which used to surface as an unhandled KeyError 500.
+    """
+
+    def __init__(self, names: list[str]) -> None:
+        super().__init__(", ".join(names))
+        self.names = names
+
+
 async def _any(session: AsyncSession, model) -> bool:
     return (await session.scalars(select(model.id).limit(1))).first() is not None
 
@@ -4547,9 +4593,21 @@ async def seed_all(session: AsyncSession) -> dict[str, int]:
             )
             created["tags"] += 1
 
-    by_name = {t.name: t.id for t in await tag_service.list_tags(session)}
+    # include_archived=True: archiving is this app's delete, so an archived seed tag is
+    # still a real row whose id the rule and template must keep pointing at. Excluding
+    # them here turned a re-seed into a KeyError.
+    by_name = {
+        t.name: t.id for t in await tag_service.list_tags(session, include_archived=True)
+    }
 
-    if not await _any(session, Rule):
+    needs_rule = not await _any(session, Rule)
+    needs_template = not await _any(session, Template)
+    if needs_rule or needs_template:
+        missing = [name for name, _, _ in SEED_TAGS if name not in by_name]
+        if missing:
+            raise SeedTagsMissing(missing)
+
+    if needs_rule:
         await rule_service.create_rule_version(
             session,
             RuleCreate(
@@ -4576,7 +4634,7 @@ async def seed_all(session: AsyncSession) -> dict[str, int]:
         )
         created["rules"] += 1
 
-    if not await _any(session, Template):
+    if needs_template:
         template = await template_service.create_template(
             session, TemplateCreate(name="Default week")
         )
@@ -4601,7 +4659,7 @@ async def seed_all(session: AsyncSession) -> dict[str, int]:
 - [ ] **Step 4: Create `backend/app/routers/seed.py`**
 
 ```python
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
@@ -4612,7 +4670,14 @@ router = APIRouter(prefix="/api/seed", tags=["seed"])
 
 @router.post("")
 async def seed(session: AsyncSession = Depends(get_session)) -> dict[str, int]:
-    return await service.seed_all(session)
+    try:
+        return await service.seed_all(session)
+    except service.SeedTagsMissing as exc:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"cannot seed: these tags are missing or renamed — {exc}. "
+            "Recreate them with their original names, or seed into an empty database.",
+        )
 ```
 
 - [ ] **Step 5: Register in `backend/app/main.py`**
@@ -4626,7 +4691,7 @@ app.include_router(seed_router.router)
 - [ ] **Step 6: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (107 tests)
+Expected: PASS (109 tests)
 
 If `test_seeded_week_materializes_and_matches_631_shape` reports A/B verdicts other than `pass`, the seed block times are wrong — recheck them against the table in Step 3 before changing the analytics engine. The engine is proven by Task 6's tests.
 
@@ -4844,7 +4909,7 @@ app = FastAPI(title="Avery", version="0.1.0", lifespan=lifespan)
 - [ ] **Step 5: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (112 tests)
+Expected: PASS (114 tests)
 
 - [ ] **Step 6: Verify the server actually boots**
 
@@ -4976,7 +5041,7 @@ Creates the eight tags, the 6:3:1 rule, and the default weekly template.
 - [ ] **Step 6: Run the full suite one last time**
 
 Run: `cd backend && .venv/bin/pytest -v`
-Expected: PASS (112 tests)
+Expected: PASS (114 tests)
 
 - [ ] **Step 7: Commit**
 
