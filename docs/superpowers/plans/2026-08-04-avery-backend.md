@@ -3612,6 +3612,31 @@ async def test_delete_report(client):
     assert (await client.get(f"/api/reports/{report_id}")).status_code == 404
 
 
+async def test_malformed_month_filter_is_422_not_500(client):
+    """The list filter used to slice the string itself, so anything unparseable
+    reached int() and surfaced as a 500."""
+    for bad in ("garbage", "2026", "2026-13", "0000-01", ""):
+        got = await client.get("/api/reports", params={"month": bad})
+        assert got.status_code == 422, bad
+
+
+def test_month_bounds_handles_december_and_leap_february():
+    """December must roll the year rather than reaching month 13, and a leap
+    February must be 29 days. Neither had coverage."""
+    from datetime import date, datetime
+
+    from app.services.reports import month_bounds
+
+    first, last, start_dt, end_dt = month_bounds(2026, 12)
+    assert (first, last) == (date(2026, 12, 1), date(2026, 12, 31))
+    assert start_dt == datetime(2026, 12, 1)
+    assert end_dt == datetime(2027, 1, 1)
+
+    first, last, _, end_dt = month_bounds(2028, 2)
+    assert (first, last) == (date(2028, 2, 1), date(2028, 2, 29))
+    assert end_dt == datetime(2028, 3, 1)
+
+
 async def test_deleting_a_rule_a_report_snapshots_is_409(client):
     """A report freezes rule_id forever, so that rule must become undeletable."""
     await _setup(client)
@@ -3706,6 +3731,7 @@ class ReportOut(BaseModel):
 
 ```python
 import calendar as calendar_lib
+import re
 from datetime import date, datetime, timedelta
 
 from sqlalchemy import select
@@ -3715,6 +3741,28 @@ from app.models import Report
 from app.services import evaluation as evaluation_service
 
 NARRATIVE_PLACEHOLDER = "Narrative generation arrives with the agent layer."
+
+MONTH_KEY = re.compile(r"^(\d{4})-(\d{2})$")
+
+
+class InvalidMonthKey(Exception):
+    """Raised when a month key is not a well-formed, in-range YYYY-MM."""
+
+
+def parse_month_key(value: str) -> tuple[int, int]:
+    """The single place that turns "YYYY-MM" into (year, month).
+
+    The run route and the list filter each used to slice this string themselves with
+    different validation, which is how `?month=garbage` reached `int()` and returned
+    a 500 from an endpoint that should answer 422.
+    """
+    match = MONTH_KEY.match(value)
+    if match is None:
+        raise InvalidMonthKey(value)
+    year, month = int(match.group(1)), int(match.group(2))
+    if not 1 <= month <= 12 or not 1 <= year <= 9999:
+        raise InvalidMonthKey(value)
+    return year, month
 
 
 def month_bounds(year: int, month: int) -> tuple[date, date, datetime, datetime]:
@@ -3747,7 +3795,7 @@ async def run_report(session: AsyncSession, year: int, month: int) -> Report:
 async def list_reports(session: AsyncSession, month_key: str | None = None) -> list[Report]:
     stmt = select(Report).order_by(Report.created_at.desc(), Report.id.desc())
     if month_key is not None:
-        year, month = int(month_key[:4]), int(month_key[5:7])
+        year, month = parse_month_key(month_key)
         first, _, _, _ = month_bounds(year, month)
         stmt = stmt.where(Report.period_start == first)
     return list((await session.scalars(stmt)).all())
@@ -3782,14 +3830,18 @@ router = APIRouter(prefix="/api/reports", tags=["reports"])
 
 @router.get("", response_model=list[ReportOut])
 async def list_reports(month: str | None = None, session: AsyncSession = Depends(get_session)):
-    return await service.list_reports(session, month)
+    try:
+        return await service.list_reports(session, month)
+    except service.InvalidMonthKey:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "month must be YYYY-MM")
 
 
 @router.post("/run", response_model=ReportOut, status_code=status.HTTP_201_CREATED)
 async def run_report(body: ReportRun, session: AsyncSession = Depends(get_session)):
-    year, month = int(body.month[:4]), int(body.month[5:7])
-    if not 1 <= month <= 12:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "month must be 01-12")
+    try:
+        year, month = service.parse_month_key(body.month)
+    except service.InvalidMonthKey:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "month must be YYYY-MM")
     try:
         return await service.run_report(session, year, month)
     except evaluation_service.NoActiveRule:
@@ -3870,7 +3922,7 @@ app.include_router(reports_router.router)
 - [ ] **Step 9: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (90 tests)
+Expected: PASS (92 tests)
 
 - [ ] **Step 10: Commit**
 
@@ -4254,7 +4306,7 @@ app.include_router(reminders_router.router)
 - [ ] **Step 9: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (98 tests)
+Expected: PASS (100 tests)
 
 - [ ] **Step 10: Commit**
 
@@ -4511,7 +4563,7 @@ app.include_router(seed_router.router)
 - [ ] **Step 6: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (103 tests)
+Expected: PASS (105 tests)
 
 If `test_seeded_week_materializes_and_matches_631_shape` reports A/B verdicts other than `pass`, the seed block times are wrong — recheck them against the table in Step 3 before changing the analytics engine. The engine is proven by Task 6's tests.
 
@@ -4729,7 +4781,7 @@ app = FastAPI(title="Avery", version="0.1.0", lifespan=lifespan)
 - [ ] **Step 5: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (108 tests)
+Expected: PASS (110 tests)
 
 - [ ] **Step 6: Verify the server actually boots**
 
@@ -4861,7 +4913,7 @@ Creates the eight tags, the 6:3:1 rule, and the default weekly template.
 - [ ] **Step 6: Run the full suite one last time**
 
 Run: `cd backend && .venv/bin/pytest -v`
-Expected: PASS (108 tests)
+Expected: PASS (110 tests)
 
 - [ ] **Step 7: Commit**
 
