@@ -1,6 +1,11 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+import app.models  # noqa: F401
+
+from app.database import Base, engine
 from app.routers import analytics as analytics_router
 from app.routers import calendar as calendar_router
 from app.routers import events as events_router
@@ -11,8 +16,19 @@ from app.routers import seed as seed_router
 from app.routers import tags as tags_router
 from app.routers import tasks as tasks_router
 from app.routers import templates as templates_router
+from app.scheduler.jobs import shutdown_scheduler, start_scheduler
 
-app = FastAPI(title="Avery", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    start_scheduler()
+    yield
+    shutdown_scheduler()
+
+
+app = FastAPI(title="Avery", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

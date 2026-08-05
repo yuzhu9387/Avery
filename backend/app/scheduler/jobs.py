@@ -1,0 +1,89 @@
+"""Background jobs. Each takes an explicit session and clock value so it is
+directly testable without patching time or starting APScheduler.
+"""
+
+import logging
+from datetime import date, datetime, timedelta
+
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.config import settings
+from app.database import async_session_factory
+from app.services import reminders as reminder_service
+from app.services import templates as template_service
+
+logger = logging.getLogger(__name__)
+_scheduler: AsyncIOScheduler | None = None
+
+
+async def roll_next_week(session: AsyncSession, today: date) -> dict:
+    """Materialize the week following `today`. Idempotent — safe to run repeatedly."""
+    next_monday = today + timedelta(days=8 - today.isoweekday())
+    try:
+        monday, created, skipped = await template_service.materialize_week(session, next_monday)
+    except template_service.NoActiveTemplate:
+        logger.warning("week roll skipped: no active template")
+        return {"week_start": None, "created": 0, "skipped_reason": "no active template"}
+    return {
+        "week_start": monday.isoformat(),
+        "created": len(created),
+        "skipped_days": [d.isoformat() for d in skipped],
+    }
+
+
+async def sweep_reminders(session: AsyncSession, now: datetime) -> list[int]:
+    """Mark every due reminder as sent. Returns the ids handled.
+
+    Lark delivery is wired in during Plan 3; marking sent here already makes the
+    sweep exactly-once.
+    """
+    due = await reminder_service.list_due(session, now)
+    handled: list[int] = []
+    for reminder in due:
+        await reminder_service.mark_sent(session, reminder.id, now)
+        handled.append(reminder.id)
+    if handled:
+        logger.info("dispatched %d reminder(s)", len(handled))
+    return handled
+
+
+async def _run_week_roll() -> None:
+    async with async_session_factory() as session:
+        await roll_next_week(session, date.today())
+
+
+async def _run_reminder_sweep() -> None:
+    async with async_session_factory() as session:
+        await sweep_reminders(session, datetime.now())
+
+
+def start_scheduler() -> AsyncIOScheduler | None:
+    global _scheduler
+    if not settings.enable_scheduler:
+        logger.info("scheduler disabled by config")
+        return None
+    _scheduler = AsyncIOScheduler()
+    _scheduler.add_job(
+        _run_week_roll,
+        CronTrigger(day_of_week="sun", hour=settings.week_roll_hour, minute=0),
+        id="week_roll",
+        replace_existing=True,
+    )
+    _scheduler.add_job(
+        _run_reminder_sweep,
+        CronTrigger(minute="*/15"),
+        id="reminder_sweep",
+        replace_existing=True,
+    )
+    _scheduler.start()
+    logger.info("scheduler started")
+    return _scheduler
+
+
+def shutdown_scheduler() -> None:
+    global _scheduler
+    if _scheduler is not None:
+        _scheduler.shutdown(wait=False)
+        _scheduler = None
