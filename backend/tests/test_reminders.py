@@ -101,10 +101,17 @@ async def test_explicit_null_on_non_nullable_field_is_422_not_500(client):
     assert undismissed.json()["dismissed_at"] is None
 
 
-async def test_deleting_a_task_removes_its_reminders(client, session):
-    """SQLite ignores ON DELETE CASCADE unless the foreign_keys pragma is on. Without
-    it a deleted task leaves live reminders behind, and the dispatcher fires them for
-    a task that no longer exists."""
+async def test_archiving_a_task_preserves_its_reminders(client, session):
+    """`DELETE /api/tasks/{id}` archives rather than hard-deletes (see F2), so the
+    ON DELETE CASCADE from tasks to reminders is no longer reachable through this
+    route at all — archiving must not touch the reminder rows.
+
+    This replaces a test that asserted the opposite (hard delete cascading away the
+    reminder) back when the route actually issued a hard delete. The FK pragma and
+    the cascade itself are still real; they are just exercised at the ORM level now,
+    not through this endpoint. See test_events.py for the identical change to the
+    task -> events cascade test, made for the same reason.
+    """
     from datetime import datetime
 
     task_id = await _task(client)
@@ -113,10 +120,12 @@ async def test_deleting_a_task_removes_its_reminders(client, session):
     )
     assert len(await service.list_due(session, datetime(2026, 8, 10, 12, 0))) == 1
 
-    assert (await client.delete(f"/api/tasks/{task_id}")).status_code == 204
+    archived = await client.delete(f"/api/tasks/{task_id}")
+    assert archived.status_code == 200
+    assert archived.json()["status"] == "archived"
 
-    assert await service.list_due(session, datetime(2026, 8, 10, 12, 0)) == []
-    assert (await client.get("/api/reminders")).json() == []
+    assert len(await service.list_due(session, datetime(2026, 8, 10, 12, 0))) == 1
+    assert len((await client.get("/api/reminders")).json()) == 1
 
 
 async def test_delete_reminder(client):

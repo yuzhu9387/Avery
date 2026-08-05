@@ -13,12 +13,15 @@ async def list_tasks(
     *,
     status: TaskStatus | None = None,
     is_floating: bool | None = None,
+    include_archived: bool = False,
 ) -> list[Task]:
     stmt = select(Task).order_by(Task.created_at.desc(), Task.id.desc())
     if status is not None:
         stmt = stmt.where(Task.status == status)
     if is_floating is not None:
         stmt = stmt.where(Task.is_floating.is_(is_floating))
+    if not include_archived and status != TaskStatus.ARCHIVED:
+        stmt = stmt.where(Task.status != TaskStatus.ARCHIVED)
     return list((await session.scalars(stmt)).all())
 
 
@@ -51,13 +54,18 @@ async def update_task(session: AsyncSession, task_id: int, data: TaskUpdate) -> 
     return task
 
 
-async def delete_task(session: AsyncSession, task_id: int) -> bool:
+async def archive_task(session: AsyncSession, task_id: int) -> Task | None:
+    """Tasks are never hard-deleted. Events freeze onto a task and carry the minutes
+    every ratio is computed from, so removing the row would silently rewrite history —
+    the same reason tags archive rather than delete. Idempotent.
+    """
     task = await session.get(Task, task_id)
     if task is None:
-        return False
-    await session.delete(task)
+        return None
+    task.status = TaskStatus.ARCHIVED
     await session.commit()
-    return True
+    await session.refresh(task)
+    return task
 
 
 async def find_or_create_by_name(
@@ -68,7 +76,11 @@ async def find_or_create_by_name(
     existing = (await session.scalars(stmt)).first()
     if existing is not None:
         return existing
-    task = Task(name=name, tag_ids=list(tag_ids))
+    # A task created as a side effect of naming has no schedule of its own yet, so
+    # floating is the honest state. Materialization and event creation attach events
+    # to it immediately afterwards, and having events is what moves it into the
+    # Scheduled section regardless of this flag.
+    task = Task(name=name, tag_ids=list(tag_ids), is_floating=True)
     session.add(task)
     await session.commit()
     await session.refresh(task)

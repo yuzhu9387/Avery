@@ -148,12 +148,15 @@ def test_primary_tag_attributes_the_whole_event():
     assert by_key["C"].minutes == 0
 
 
-def test_untagged_event_counts_as_unassigned():
+def test_untagged_event_counts_as_untagged_not_unassigned():
+    """No tags at all is distinct from a tag that exists but maps to no group —
+    otherwise the "Unassigned — Nh across M tags" banner renders "across 0 tags"."""
     bare = EventSlice(
         id=1, start_at=datetime(2026, 8, 3, 9), end_at=datetime(2026, 8, 3, 10), tag_ids=()
     )
     result = evaluate([bare], RULE, PERIOD_START, PERIOD_END)
-    assert result.unassigned_minutes == 60
+    assert result.untagged_minutes == 60
+    assert result.unassigned_minutes == 0
     assert result.has_data is False
 
 
@@ -266,6 +269,6 @@ def test_to_dict_is_json_serializable():
     payload = evaluate([a, b], RULE, PERIOD_START, PERIOD_END).to_dict()
 
     encoded = json.dumps(payload, allow_nan=False)  # raises on inf/nan
-    assert json.loads(encoded)["minutes_by_tag"] == {str(WORK): 120, str(KIDS): 120}
+    assert json.loads(encoded)["minutes_by_primary_tag"] == {str(WORK): 120, str(KIDS): 120}
     assert json.loads(encoded)["overlaps"] == [[1, 2]]
     assert {g["key"] for g in payload["groups"]} == {"A", "B", "C"}

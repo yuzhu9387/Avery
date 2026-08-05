@@ -6,6 +6,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import Event, Task
 from app.schemas.event import EventCreate, EventUpdate
 from app.services import tasks as task_service
+from app.services.tags import assert_tags_exist
+
+
+class TaskNotFound(Exception):
+    """Raised when create_event is given a task_id that does not exist."""
 
 
 async def list_events(
@@ -32,10 +37,15 @@ async def get_event(session: AsyncSession, event_id: int) -> Event | None:
 
 async def create_event(session: AsyncSession, data: EventCreate) -> Event:
     tag_ids = list(data.tag_ids)
+    # Validate explicit tag ids before find_or_create_by_name can commit a new Task —
+    # otherwise a typo'd tag id leaves a real Task row behind even though the event
+    # creation itself 422s.
+    if tag_ids:
+        await assert_tags_exist(session, tag_ids)
     if data.task_id is not None:
         task = await session.get(Task, data.task_id)
         if task is None:
-            raise ValueError(f"task {data.task_id} not found")
+            raise TaskNotFound(f"task {data.task_id} not found")
     else:
         task = await task_service.find_or_create_by_name(session, data.task_name, tag_ids)
     if not tag_ids:
@@ -73,6 +83,13 @@ async def update_event(session: AsyncSession, event_id: int, data: EventUpdate) 
     new_end = fields.get("end_at", event.end_at)
     if new_end <= new_start:
         raise ValueError("end_at must be after start_at")
+
+    if fields.get("tag_ids") == []:
+        task = await session.get(Task, event.task_id)
+        if task is not None:
+            fields["tag_ids"] = list(task.tag_ids)
+    elif "tag_ids" in fields:
+        await assert_tags_exist(session, fields["tag_ids"])
 
     for key, value in fields.items():
         setattr(event, key, value)

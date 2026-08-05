@@ -1,3 +1,7 @@
+import pytest
+
+from app.services import evaluation as evaluation_service
+
 RULE_BODY = {
     "name": "6:3:1 baseline",
     "tolerance": 0.2,
@@ -72,6 +76,19 @@ async def test_inverted_period_is_422_not_a_false_under(client):
         json={"period_start": "2026-09-01T00:00:00", "period_end": "2026-08-01T00:00:00"},
     )
     assert result.status_code == 422
+
+
+async def test_evaluate_period_service_rejects_reversed_range_directly(client, session):
+    """The Task-7 fix put the reversed-period guard in a Pydantic model inside the
+    router, so calling evaluate_period directly bypassed it entirely and returned
+    a false all-"under" payload. The guard belongs in the service."""
+    await _setup(client)
+    from datetime import datetime
+
+    with pytest.raises(evaluation_service.InvalidPeriod):
+        await evaluation_service.evaluate_period(
+            session, datetime(2026, 9, 1), datetime(2026, 8, 1)
+        )
 
 
 async def test_evaluate_with_explicit_rule_id(client):

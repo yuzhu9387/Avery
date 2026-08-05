@@ -73,7 +73,87 @@ async def test_partial_patch_leaves_unmentioned_fields_alone(client):
     assert body["due_date"] == "2026-09-01"
 
 
-async def test_delete_task(client):
+async def test_delete_task_archives_it(client):
+    """Tasks are never hard-deleted: archiving preserves history (and the events
+    that carry the minutes every ratio is computed from) while hiding the task from
+    the default list."""
     task_id = (await client.post("/api/tasks", json={"name": "Temp", "tag_ids": []})).json()["id"]
-    assert (await client.delete(f"/api/tasks/{task_id}")).status_code == 204
-    assert (await client.get(f"/api/tasks/{task_id}")).status_code == 404
+
+    archived = await client.delete(f"/api/tasks/{task_id}")
+    assert archived.status_code == 200
+    assert archived.json()["status"] == "archived"
+
+    # Still fetchable by id; just no longer in the default list.
+    assert (await client.get(f"/api/tasks/{task_id}")).status_code == 200
+    default_list = await client.get("/api/tasks")
+    assert task_id not in [t["id"] for t in default_list.json()]
+
+    included = await client.get("/api/tasks", params={"include_archived": True})
+    assert task_id in [t["id"] for t in included.json()]
+
+    archived_filter = await client.get("/api/tasks", params={"status_filter": "archived"})
+    assert task_id in [t["id"] for t in archived_filter.json()]
+
+    # Idempotent: archiving twice succeeds.
+    again = await client.delete(f"/api/tasks/{task_id}")
+    assert again.status_code == 200
+    assert again.json()["status"] == "archived"
+
+
+async def test_delete_missing_task_is_404(client):
+    assert (await client.delete("/api/tasks/999")).status_code == 404
+
+
+async def test_find_or_create_by_name_produces_a_floating_task(client, session):
+    """A task created as a side effect of naming (no schedule of its own yet) has
+    no events, so it belongs in neither Scheduled nor Floating unless it is
+    explicitly marked floating."""
+    from app.services import tasks as service
+
+    task = await service.find_or_create_by_name(session, "Side effect task", [])
+    assert task.is_floating is True
+
+    created = await client.post(
+        "/api/events",
+        json={
+            "task_name": "Side effect task",
+            "start_at": "2026-08-05T15:00:00",
+            "end_at": "2026-08-05T16:00:00",
+        },
+    )
+    assert created.status_code == 201
+    assert created.json()["task_id"] == task.id
+
+
+async def test_archiving_a_task_leaves_analytics_ratios_unchanged(client):
+    """Archiving must not rewrite history: the minutes an archived task's events
+    already contributed have to keep counting exactly as before."""
+    tag_id = await _tag(client)
+    task_id = (
+        await client.post("/api/tasks", json={"name": "Work block", "tag_ids": [tag_id]})
+    ).json()["id"]
+    await client.post(
+        "/api/events",
+        json={
+            "task_id": task_id,
+            "start_at": "2026-08-03T09:00:00",
+            "end_at": "2026-08-03T15:00:00",
+            "tag_ids": [tag_id],
+        },
+    )
+    await client.post(
+        "/api/rules",
+        json={
+            "name": "solo",
+            "tolerance": 0.2,
+            "exclude_tag_ids": [],
+            "groups": [{"key": "A", "label": "Work", "ratio": 1, "tag_ids": [tag_id]}],
+        },
+    )
+    period = {"period_start": "2026-08-01T00:00:00", "period_end": "2026-09-01T00:00:00"}
+    before = (await client.post("/api/analytics/evaluate", json=period)).json()["metrics"]
+
+    assert (await client.delete(f"/api/tasks/{task_id}")).status_code == 200
+
+    after = (await client.post("/api/analytics/evaluate", json=period)).json()["metrics"]
+    assert after["total_minutes"] == before["total_minutes"] == 360

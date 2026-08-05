@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Report, Rule
 from app.schemas.rule import RuleCreate
+from app.services.tags import assert_tags_exist
 
 
 class RuleInUse(Exception):
@@ -65,6 +66,11 @@ async def get_active_rule(session: AsyncSession) -> Rule | None:
 
 async def create_rule_version(session: AsyncSession, data: RuleCreate) -> Rule:
     """Closes the currently open rule and inserts a new one. Never mutates in place."""
+    all_tag_ids: set[int] = set(data.exclude_tag_ids)
+    for group in data.groups:
+        all_tag_ids.update(group.tag_ids)
+    await assert_tags_exist(session, all_tag_ids)
+
     today = date.today()
     current = await get_active_rule(session)
     if current is not None:

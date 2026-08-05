@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_session
 from app.schemas.rule import RuleCreate, RuleOut
 from app.services import rules as service
+from app.services.tags import UnknownTagIds
 
 router = APIRouter(prefix="/api/rules", tags=["rules"])
 
@@ -15,7 +16,10 @@ async def list_rules(session: AsyncSession = Depends(get_session)):
 
 @router.post("", response_model=RuleOut, status_code=status.HTTP_201_CREATED)
 async def create_rule_version(data: RuleCreate, session: AsyncSession = Depends(get_session)):
-    return await service.create_rule_version(session, data)
+    try:
+        return await service.create_rule_version(session, data)
+    except UnknownTagIds as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"unknown tag ids: {exc}")
 
 
 @router.get("/active", response_model=RuleOut)

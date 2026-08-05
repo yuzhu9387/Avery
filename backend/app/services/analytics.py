@@ -67,6 +67,7 @@ class Evaluation:
     unassigned_minutes: int
     unassigned_tag_ids: list[int]
     excluded_minutes: int
+    untagged_minutes: int
     overlaps: list[tuple[int, int]] = field(default_factory=list)
 
     @property
@@ -79,10 +80,11 @@ class Evaluation:
             "total_minutes": self.total_minutes,
             "total_hours": round(self.total_minutes / 60, 2),
             "groups": [g.to_dict() for g in self.groups],
-            "minutes_by_tag": {str(k): v for k, v in self.minutes_by_tag.items()},
+            "minutes_by_primary_tag": {str(k): v for k, v in self.minutes_by_tag.items()},
             "unassigned_minutes": self.unassigned_minutes,
             "unassigned_tag_ids": self.unassigned_tag_ids,
             "excluded_minutes": self.excluded_minutes,
+            "untagged_minutes": self.untagged_minutes,
             "overlaps": [list(pair) for pair in self.overlaps],
         }
 
@@ -138,6 +140,7 @@ def evaluate(
     unassigned_minutes = 0
     unassigned_tags: set[int] = set()
     excluded_minutes = 0
+    untagged_minutes = 0
 
     for s in slices:
         minutes = minutes_in_window(s, period_start, period_end)
@@ -149,11 +152,15 @@ def evaluate(
         if tag_id in excluded:
             excluded_minutes += minutes
             continue
-        group_key = tag_to_group.get(tag_id) if tag_id is not None else None
+        if tag_id is None:
+            # No tags at all — distinct from a tag that exists but maps to no group,
+            # so "Unassigned — Nh across M tags" never renders "across 0 tags".
+            untagged_minutes += minutes
+            continue
+        group_key = tag_to_group.get(tag_id)
         if group_key is None:
             unassigned_minutes += minutes
-            if tag_id is not None:
-                unassigned_tags.add(tag_id)
+            unassigned_tags.add(tag_id)
             continue
         minutes_by_group[group_key] += minutes
 
@@ -203,5 +210,6 @@ def evaluate(
         unassigned_minutes=unassigned_minutes,
         unassigned_tag_ids=sorted(unassigned_tags),
         excluded_minutes=excluded_minutes,
+        untagged_minutes=untagged_minutes,
         overlaps=find_overlaps(in_period),
     )

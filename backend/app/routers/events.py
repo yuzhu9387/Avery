@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_session
 from app.schemas.event import EventCreate, EventMove, EventOut, EventUpdate
 from app.services import events as service
+from app.services.tags import UnknownTagIds
 
 router = APIRouter(prefix="/api/events", tags=["events"])
 
@@ -24,6 +25,10 @@ async def list_events(
 async def create_event(data: EventCreate, session: AsyncSession = Depends(get_session)):
     try:
         return await service.create_event(session, data)
+    except service.TaskNotFound as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc))
+    except UnknownTagIds as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"unknown tag ids: {exc}")
     except ValueError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc))
 
@@ -42,6 +47,8 @@ async def update_event(
 ):
     try:
         event = await service.update_event(session, event_id, data)
+    except UnknownTagIds as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"unknown tag ids: {exc}")
     except ValueError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc))
     if event is None:

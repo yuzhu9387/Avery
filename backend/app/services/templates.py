@@ -8,6 +8,7 @@ from app.models.event import EventSource
 from app.schemas.template import TemplateBlockCreate, TemplateCreate
 from app.services import events as event_service
 from app.services import tasks as task_service
+from app.services.analytics import EventSlice, split_minutes_by_day
 
 
 class NoActiveTemplate(Exception):
@@ -98,12 +99,25 @@ async def delete_block(session: AsyncSession, block_id: int) -> bool:
 
 
 async def _days_with_events(session: AsyncSession, monday: date, next_monday: date) -> set[date]:
+    """Every day an event *touches*, not merely the day it starts on.
+
+    A Sunday-night block running into Monday occupies Monday too. Keying off start_at
+    alone let materialization pile a full template day on top of it.
+    """
     rows = await event_service.list_events(
         session,
         start=datetime.combine(monday, datetime.min.time()),
         end=datetime.combine(next_monday, datetime.min.time()),
     )
-    return {e.start_at.date() for e in rows}
+    occupied: set[date] = set()
+    for event in rows:
+        slice_ = EventSlice(
+            id=event.id, start_at=event.start_at, end_at=event.end_at, tag_ids=()
+        )
+        for day in split_minutes_by_day(slice_):
+            if monday <= day < next_monday:
+                occupied.add(day)
+    return occupied
 
 
 async def materialize_week(

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
@@ -13,9 +13,15 @@ router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 async def list_tasks(
     status_filter: TaskStatus | None = None,
     is_floating: bool | None = None,
+    include_archived: bool = False,
     session: AsyncSession = Depends(get_session),
 ):
-    return await service.list_tasks(session, status=status_filter, is_floating=is_floating)
+    return await service.list_tasks(
+        session,
+        status=status_filter,
+        is_floating=is_floating,
+        include_archived=include_archived,
+    )
 
 
 @router.post("", response_model=TaskOut, status_code=status.HTTP_201_CREATED)
@@ -39,8 +45,9 @@ async def update_task(task_id: int, data: TaskUpdate, session: AsyncSession = De
     return task
 
 
-@router.delete("/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{task_id}", response_model=TaskOut, status_code=status.HTTP_200_OK)
 async def delete_task(task_id: int, session: AsyncSession = Depends(get_session)):
-    if not await service.delete_task(session, task_id):
+    task = await service.archive_task(session, task_id)
+    if task is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "task not found")
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    return task

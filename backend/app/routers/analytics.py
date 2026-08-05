@@ -37,6 +37,8 @@ async def evaluate_period(
         raise HTTPException(status.HTTP_409_CONFLICT, "no active rule — create one first")
     except service.RuleNotFound:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"rule {body.rule_id} not found")
+    except service.InvalidPeriod:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "period_end must be after period_start")
     return {
         "period_start": body.period_start,
         "period_end": body.period_end,

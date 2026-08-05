@@ -1,3 +1,5 @@
+from collections.abc import Sequence
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -7,6 +9,27 @@ from app.schemas.tag import TagCreate, TagUpdate
 
 class DuplicateTagName(Exception):
     """Raised when a tag name collides with an existing one."""
+
+
+class UnknownTagIds(Exception):
+    """Raised when a tag id does not correspond to any tag row."""
+
+    def __init__(self, ids: list[int]) -> None:
+        super().__init__(", ".join(str(i) for i in ids))
+        self.ids = ids
+
+
+async def assert_tags_exist(session: AsyncSession, tag_ids: Sequence[int]) -> None:
+    """Archived tags count as existing — they are still real rows events point at."""
+    wanted = {int(t) for t in tag_ids}
+    if not wanted:
+        return
+    found = set(
+        (await session.scalars(select(Tag.id).where(Tag.id.in_(wanted)))).all()
+    )
+    missing = sorted(wanted - found)
+    if missing:
+        raise UnknownTagIds(missing)
 
 
 async def list_tags(session: AsyncSession, include_archived: bool = False) -> list[Tag]:

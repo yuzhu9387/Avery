@@ -22,6 +22,10 @@ class RuleNotFound(Exception):
     """
 
 
+class InvalidPeriod(Exception):
+    """Raised when period_end is not strictly after period_start."""
+
+
 def to_slice(event: Event) -> EventSlice:
     return EventSlice(
         id=event.id,
@@ -37,6 +41,8 @@ async def evaluate_period(
     period_end: datetime,
     rule_id: int | None = None,
 ) -> tuple[Evaluation, Rule]:
+    if period_end <= period_start:
+        raise InvalidPeriod()
     if rule_id is None:
         rule = await rule_service.get_active_rule(session)
         if rule is None:

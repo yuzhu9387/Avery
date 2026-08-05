@@ -182,9 +182,10 @@ async def test_range_filter_excludes_exact_boundaries(client):
     assert [e["start_at"] for e in listed.json()] == ["2026-08-03T09:00:00"]
 
 
-async def test_deleting_a_task_removes_its_events(client):
-    """The cascade is only real with SQLite's foreign_keys pragma on. Orphan events
-    would still render on the calendar and 404 when their card is opened."""
+async def test_archiving_a_task_preserves_its_events(client):
+    """DELETE /api/tasks/{id} archives rather than hard-deletes. Events freeze the
+    minutes every ratio is computed from, so archiving must not touch them — the
+    inverse of the old (destructive) cascade behavior this test used to assert."""
     task_id = await _task(client, "Doomed")
     await client.post(
         "/api/events",
@@ -196,8 +197,123 @@ async def test_deleting_a_task_removes_its_events(client):
     )
     assert len((await client.get("/api/events")).json()) == 1
 
-    assert (await client.delete(f"/api/tasks/{task_id}")).status_code == 204
-    assert (await client.get("/api/events")).json() == []
+    archived = await client.delete(f"/api/tasks/{task_id}")
+    assert archived.status_code == 200
+    assert archived.json()["status"] == "archived"
+
+    events = (await client.get("/api/events")).json()
+    assert len(events) == 1
+    assert events[0]["task_id"] == task_id
+
+
+async def test_patching_tag_ids_to_empty_inherits_task_tags(client):
+    """update_event must treat an empty tag_ids the same way create_event does:
+    as "inherit the task's", not "have none" — the identical regression class
+    already fixed for template blocks."""
+    tag_id = (
+        await client.post("/api/tags", json={"name": "Deep work", "color": "#DA96A4"})
+    ).json()["id"]
+    task_id = (
+        await client.post("/api/tasks", json={"name": "Work block", "tag_ids": [tag_id]})
+    ).json()["id"]
+    event_id = (
+        await client.post(
+            "/api/events",
+            json={
+                "task_id": task_id,
+                "start_at": "2026-08-03T09:00:00",
+                "end_at": "2026-08-03T10:00:00",
+                "tag_ids": [],
+            },
+        )
+    ).json()["id"]
+
+    patched = await client.patch(f"/api/events/{event_id}", json={"tag_ids": []})
+    assert patched.status_code == 200
+    assert patched.json()["tag_ids"] == [tag_id]
+
+
+async def test_patching_tag_ids_to_nonempty_still_replaces_them(client):
+    tag_a = (await client.post("/api/tags", json={"name": "A", "color": "#DA96A4"})).json()["id"]
+    tag_b = (await client.post("/api/tags", json={"name": "B", "color": "#BDBD9B"})).json()["id"]
+    task_id = (
+        await client.post("/api/tasks", json={"name": "Work block", "tag_ids": [tag_a]})
+    ).json()["id"]
+    event_id = (
+        await client.post(
+            "/api/events",
+            json={
+                "task_id": task_id,
+                "start_at": "2026-08-03T09:00:00",
+                "end_at": "2026-08-03T10:00:00",
+                "tag_ids": [tag_a],
+            },
+        )
+    ).json()["id"]
+
+    patched = await client.patch(f"/api/events/{event_id}", json={"tag_ids": [tag_b]})
+    assert patched.json()["tag_ids"] == [tag_b]
+
+
+async def test_create_event_with_unknown_task_id_is_404(client):
+    bad = await client.post(
+        "/api/events",
+        json={
+            "task_id": 9999,
+            "start_at": "2026-08-05T15:00:00",
+            "end_at": "2026-08-05T16:00:00",
+        },
+    )
+    assert bad.status_code == 404
+
+
+async def test_create_event_with_unknown_tag_id_is_422(client):
+    task_id = await _task(client)
+    bad = await client.post(
+        "/api/events",
+        json={
+            "task_id": task_id,
+            "start_at": "2026-08-05T15:00:00",
+            "end_at": "2026-08-05T16:00:00",
+            "tag_ids": [9999],
+        },
+    )
+    assert bad.status_code == 422
+
+
+async def test_update_event_with_unknown_tag_id_is_422(client):
+    task_id = await _task(client)
+    event_id = (
+        await client.post(
+            "/api/events",
+            json={
+                "task_id": task_id,
+                "start_at": "2026-08-03T09:00:00",
+                "end_at": "2026-08-03T10:00:00",
+            },
+        )
+    ).json()["id"]
+    bad = await client.patch(f"/api/events/{event_id}", json={"tag_ids": [9999]})
+    assert bad.status_code == 422
+
+
+async def test_create_event_with_archived_tag_id_is_accepted(client):
+    tag_id = (
+        await client.post("/api/tags", json={"name": "Old tag", "color": "#DA96A4"})
+    ).json()["id"]
+    await client.delete(f"/api/tags/{tag_id}")  # archives, row still exists
+
+    task_id = await _task(client)
+    created = await client.post(
+        "/api/events",
+        json={
+            "task_id": task_id,
+            "start_at": "2026-08-05T15:00:00",
+            "end_at": "2026-08-05T16:00:00",
+            "tag_ids": [tag_id],
+        },
+    )
+    assert created.status_code == 201
 
 
 async def test_delete_event(client):

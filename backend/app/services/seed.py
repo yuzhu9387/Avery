@@ -8,23 +8,25 @@ from datetime import time
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Rule, Tag, Template
+from app.models import Rule, Tag, Template, TemplateBlock
 from app.schemas.rule import RuleCreate, RuleGroup
 from app.schemas.tag import TagCreate
-from app.schemas.template import TemplateBlockCreate, TemplateCreate
+from app.schemas.template import TemplateCreate
 from app.services import rules as rule_service
 from app.services import tags as tag_service
 from app.services import templates as template_service
 
 SEED_TAGS: list[tuple[str, str, str]] = [
-    ("Rest", "#DEDECF", "moon"),
-    ("Work", "#DA96A4", "briefcase"),
-    ("Study", "#C9A88F", "book"),
-    ("Commute", "#BDBD9B", "bus"),
-    ("Kids/Family", "#8FA8A2", "family"),
-    ("Chores/Prep", "#E7C8C8", "home"),
-    ("Fitness", "#DA96A4", "dumbbell"),
-    ("Personal", "#C9A88F", "user"),
+    # Colour family follows rule group, so the week grid reads as the ratio itself:
+    # group A rose, group B earth, group C teal, excluded neutral.
+    ("Rest", "#DEDECF", "moon"),  # excluded — pale
+    ("Work", "#DA96A4", "briefcase"),  # group A — rose
+    ("Study", "#C97B8B", "book"),  # group A — deep rose
+    ("Commute", "#E7C8C8", "bus"),  # group A — blush
+    ("Kids/Family", "#BDBD9B", "family"),  # group B — sage
+    ("Chores/Prep", "#C9A88F", "home"),  # group B — clay
+    ("Fitness", "#8FA8A2", "dumbbell"),  # group C — teal, deliberately the odd one out
+    ("Personal", "#6B6560", "user"),  # excluded — ink-muted
 ]
 
 WEEKDAYS = [1, 2, 3, 4, 5]
@@ -129,18 +131,18 @@ async def seed_all(session: AsyncSession) -> dict[str, int]:
             session, TemplateCreate(name="Default week")
         )
         for order, (days, start, end, task_name, tag_name) in enumerate(SEED_BLOCKS):
-            await template_service.create_block(
-                session,
-                template.id,
-                TemplateBlockCreate(
-                    days=days,
+            session.add(
+                TemplateBlock(
+                    template_id=template.id,
+                    days=list(days),
                     start_time=start,
                     end_time=end,
                     task_name=task_name,
                     tag_ids=[by_name[tag_name]],
                     sort_order=order,
-                ),
+                )
             )
+        await session.commit()
         created["templates"] += 1
 
     return created

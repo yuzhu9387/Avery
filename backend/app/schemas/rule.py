@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class RuleGroup(BaseModel):
@@ -16,6 +16,29 @@ class RuleCreate(BaseModel):
     tolerance: float = Field(default=0.2, ge=0, le=1)
     exclude_tag_ids: list[int] = Field(default_factory=list)
     note: str = ""
+
+    @model_validator(mode="after")
+    def check_tag_mapping(self) -> "RuleCreate":
+        keys = [g.key for g in self.groups]
+        if len(keys) != len(set(keys)):
+            raise ValueError("group keys must be unique")
+
+        seen: dict[int, str] = {}
+        for group in self.groups:
+            for tag_id in group.tag_ids:
+                if tag_id in seen:
+                    raise ValueError(
+                        f"tag {tag_id} appears in both group {seen[tag_id]} and {group.key}"
+                    )
+                seen[tag_id] = group.key
+
+        overlap = sorted(set(self.exclude_tag_ids) & seen.keys())
+        if overlap:
+            raise ValueError(
+                f"tags {overlap} are both excluded and assigned to a group; "
+                "excluded tags leave the ratio entirely"
+            )
+        return self
 
 
 class RuleOut(BaseModel):

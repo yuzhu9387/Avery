@@ -155,6 +155,41 @@ async def test_week_is_materialized_in_a_single_commit(client, session):
     assert max(jumps) == 12, f"events arrived in multiple commits: {committed}"
 
 
+async def test_spillover_event_occupies_the_day_it_spills_into(client):
+    """A Sunday-night event running into Monday must occupy Monday too. Keying
+    occupancy off start_at alone would leave Monday looking empty and pile a full
+    template day on top of the spilled-over minutes."""
+    all_days_block = {
+        "days": [1, 2, 3, 4, 5, 6, 7],
+        "start_time": "09:30:00",
+        "end_time": "16:30:00",
+        "task_name": "Work",
+        "tag_ids": [],
+    }
+    await _template(client, [all_days_block])
+
+    # Sunday 2026-08-02 22:00 -> Monday 2026-08-03 10:00: spills into the week
+    # that starts on Monday 2026-08-03.
+    await client.post(
+        "/api/events",
+        json={
+            "task_name": "Rest",
+            "start_at": "2026-08-02T22:00:00",
+            "end_at": "2026-08-03T10:00:00",
+        },
+    )
+
+    result = await client.post("/api/weeks/2026-08-03/materialize")
+    assert result.status_code == 200
+    body = result.json()
+    assert body["created"] == 6  # every day but the occupied Monday
+    assert body["skipped_days"] == ["2026-08-03"]
+
+    # The spilling event's own (out-of-week) start date must never leak in.
+    for day in body["skipped_days"]:
+        assert "2026-08-03" <= day < "2026-08-10"
+
+
 async def test_delete_block(client):
     template_id = await _template(client, [WEEKDAY_BLOCK])
     blocks = (await client.get(f"/api/templates/{template_id}")).json()["blocks"]

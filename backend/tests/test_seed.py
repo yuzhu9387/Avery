@@ -53,6 +53,15 @@ async def test_seeded_template_matches_the_source_grid(client):
     assert any(b["task_name"] == "Personal time" and b["days"] == [6] for b in blocks)
 
 
+async def test_seeded_template_has_exactly_19_blocks(client):
+    """The template is now seeded in a single commit built from raw ORM rows. A
+    partial seed (interrupted mid-loop under the old per-block-commit code) must
+    be impossible to mistake for success."""
+    await client.post("/api/seed")
+    template = (await client.get("/api/templates/active")).json()
+    assert len(template["blocks"]) == 19
+
+
 async def test_reseed_with_a_renamed_seed_tag_is_409_not_500(client):
     """A seed tag can be renamed, and the rule/template lookup would then find
     nothing. That must be a clear 409, not an unhandled KeyError."""
