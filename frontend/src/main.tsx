@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client'
 import { RouterProvider, createBrowserRouter } from 'react-router-dom'
 
 import App from './App'
+import MonthPage from './pages/MonthPage'
 import WeekPage from './pages/WeekPage'
 import './index.css'
 
@@ -21,7 +22,7 @@ const router = createBrowserRouter([
     element: <App />,
     children: [
       { index: true, element: <WeekPage /> },
-      { path: 'month', element: <Placeholder name="Month" /> },
+      { path: 'month', element: <MonthPage /> },
       { path: 'tasks', element: <Placeholder name="Tasks" /> },
       { path: 'tasks/:taskId', element: <Placeholder name="Task detail" /> },
       { path: 'template', element: <Placeholder name="Template" /> },
