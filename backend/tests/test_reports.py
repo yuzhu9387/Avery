@@ -89,6 +89,31 @@ async def test_delete_report(client):
     assert (await client.get(f"/api/reports/{report_id}")).status_code == 404
 
 
+async def test_malformed_month_filter_is_422_not_500(client):
+    """The list filter used to slice the string itself, so anything unparseable
+    reached int() and surfaced as a 500."""
+    for bad in ("garbage", "2026", "2026-13", "0000-01", ""):
+        got = await client.get("/api/reports", params={"month": bad})
+        assert got.status_code == 422, bad
+
+
+def test_month_bounds_handles_december_and_leap_february():
+    """December must roll the year rather than reaching month 13, and a leap
+    February must be 29 days. Neither had coverage."""
+    from datetime import date, datetime
+
+    from app.services.reports import month_bounds
+
+    first, last, start_dt, end_dt = month_bounds(2026, 12)
+    assert (first, last) == (date(2026, 12, 1), date(2026, 12, 31))
+    assert start_dt == datetime(2026, 12, 1)
+    assert end_dt == datetime(2027, 1, 1)
+
+    first, last, _, end_dt = month_bounds(2028, 2)
+    assert (first, last) == (date(2028, 2, 1), date(2028, 2, 29))
+    assert end_dt == datetime(2028, 3, 1)
+
+
 async def test_deleting_a_rule_a_report_snapshots_is_409(client):
     """A report freezes rule_id forever, so that rule must become undeletable."""
     await _setup(client)

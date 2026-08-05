@@ -11,14 +11,18 @@ router = APIRouter(prefix="/api/reports", tags=["reports"])
 
 @router.get("", response_model=list[ReportOut])
 async def list_reports(month: str | None = None, session: AsyncSession = Depends(get_session)):
-    return await service.list_reports(session, month)
+    try:
+        return await service.list_reports(session, month)
+    except service.InvalidMonthKey:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "month must be YYYY-MM")
 
 
 @router.post("/run", response_model=ReportOut, status_code=status.HTTP_201_CREATED)
 async def run_report(body: ReportRun, session: AsyncSession = Depends(get_session)):
-    year, month = int(body.month[:4]), int(body.month[5:7])
-    if not 1 <= month <= 12:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "month must be 01-12")
+    try:
+        year, month = service.parse_month_key(body.month)
+    except service.InvalidMonthKey:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "month must be YYYY-MM")
     try:
         return await service.run_report(session, year, month)
     except evaluation_service.NoActiveRule:

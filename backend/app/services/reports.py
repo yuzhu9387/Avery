@@ -1,4 +1,5 @@
 import calendar as calendar_lib
+import re
 from datetime import date, datetime, timedelta
 
 from sqlalchemy import select
@@ -8,6 +9,28 @@ from app.models import Report
 from app.services import evaluation as evaluation_service
 
 NARRATIVE_PLACEHOLDER = "Narrative generation arrives with the agent layer."
+
+MONTH_KEY = re.compile(r"^(\d{4})-(\d{2})$")
+
+
+class InvalidMonthKey(Exception):
+    """Raised when a month key is not a well-formed, in-range YYYY-MM."""
+
+
+def parse_month_key(value: str) -> tuple[int, int]:
+    """The single place that turns "YYYY-MM" into (year, month).
+
+    The run route and the list filter each used to slice this string themselves with
+    different validation, which is how `?month=garbage` reached `int()` and returned
+    a 500 from an endpoint that should answer 422.
+    """
+    match = MONTH_KEY.match(value)
+    if match is None:
+        raise InvalidMonthKey(value)
+    year, month = int(match.group(1)), int(match.group(2))
+    if not 1 <= month <= 12 or not 1 <= year <= 9999:
+        raise InvalidMonthKey(value)
+    return year, month
 
 
 def month_bounds(year: int, month: int) -> tuple[date, date, datetime, datetime]:
@@ -40,7 +63,7 @@ async def run_report(session: AsyncSession, year: int, month: int) -> Report:
 async def list_reports(session: AsyncSession, month_key: str | None = None) -> list[Report]:
     stmt = select(Report).order_by(Report.created_at.desc(), Report.id.desc())
     if month_key is not None:
-        year, month = int(month_key[:4]), int(month_key[5:7])
+        year, month = parse_month_key(month_key)
         first, _, _, _ = month_bounds(year, month)
         stmt = stmt.where(Report.period_start == first)
     return list((await session.scalars(stmt)).all())
