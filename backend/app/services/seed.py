@@ -56,6 +56,19 @@ SEED_BLOCKS: list[tuple[list[int], time, time, str, str]] = [
 ]
 
 
+class SeedTagsMissing(Exception):
+    """A tag the seed rule or template must reference is absent.
+
+    Reachable in normal use: `DELETE /api/tags/{id}` archives rather than removes, and
+    a tag can be renamed. If the rule or template then needs re-seeding, the lookup has
+    nothing to resolve — which used to surface as an unhandled KeyError 500.
+    """
+
+    def __init__(self, names: list[str]) -> None:
+        super().__init__(", ".join(names))
+        self.names = names
+
+
 async def _any(session: AsyncSession, model) -> bool:
     return (await session.scalars(select(model.id).limit(1))).first() is not None
 
@@ -70,9 +83,21 @@ async def seed_all(session: AsyncSession) -> dict[str, int]:
             )
             created["tags"] += 1
 
-    by_name = {t.name: t.id for t in await tag_service.list_tags(session)}
+    # include_archived=True: archiving is this app's delete, so an archived seed tag is
+    # still a real row whose id the rule and template must keep pointing at. Excluding
+    # them here turned a re-seed into a KeyError.
+    by_name = {
+        t.name: t.id for t in await tag_service.list_tags(session, include_archived=True)
+    }
 
-    if not await _any(session, Rule):
+    needs_rule = not await _any(session, Rule)
+    needs_template = not await _any(session, Template)
+    if needs_rule or needs_template:
+        missing = [name for name, _, _ in SEED_TAGS if name not in by_name]
+        if missing:
+            raise SeedTagsMissing(missing)
+
+    if needs_rule:
         await rule_service.create_rule_version(
             session,
             RuleCreate(
@@ -99,7 +124,7 @@ async def seed_all(session: AsyncSession) -> dict[str, int]:
         )
         created["rules"] += 1
 
-    if not await _any(session, Template):
+    if needs_template:
         template = await template_service.create_template(
             session, TemplateCreate(name="Default week")
         )
