@@ -261,6 +261,24 @@ async def test_preview_does_not_write_anything(client):
     assert body["events"][0]["start_at"] == "2026-08-03T09:30:00"
 
     assert (await client.get("/api/events")).json() == []
+
+
+async def test_preview_predicts_the_tags_that_will_be_created(client):
+    """A block declaring no tags inherits the task's at materialization, so the preview
+    must show those too. A preview that disagrees with what actually gets created is
+    worse than no preview at all."""
+    tag_id = (
+        await client.post("/api/tags", json={"name": "Deep", "color": "#DA96A4"})
+    ).json()["id"]
+    await client.post("/api/tasks", json={"name": "Work", "tag_ids": [tag_id]})
+    await _template(client, [WEEKDAY_BLOCK])  # WEEKDAY_BLOCK declares tag_ids: []
+
+    preview = (await client.get("/api/templates/active/preview/2026-08-03")).json()
+    assert preview["events"][0]["tag_ids"] == [tag_id]
+
+    await client.post("/api/weeks/2026-08-03/materialize")
+    created = (await client.get("/api/events")).json()
+    assert created[0]["tag_ids"] == preview["events"][0]["tag_ids"]
 ```
 
 `backend/tests/test_reports.py`:
@@ -385,6 +403,26 @@ async def preview_week(
     monday, next_monday = week_bounds(any_day)
     occupied = await _days_with_events(session, monday, next_monday)
 
+    # Mirror materialize_week's tag fallback: a block declaring no tags of its own
+    # inherits the resolved task's. Resolve read-only — never create — so preview stays
+    # a pure read while still predicting the tags materialization will really assign.
+    # Archived tasks are skipped for the same reason find_or_create_by_name skips them.
+    task_tags: dict[str, list[int]] = {}
+
+    async def tags_for(block: TemplateBlock) -> list[int]:
+        if block.tag_ids:
+            return list(block.tag_ids)
+        if block.task_name not in task_tags:
+            existing = (
+                await session.scalars(
+                    select(Task)
+                    .where(Task.name == block.task_name, Task.status != TaskStatus.ARCHIVED)
+                    .order_by(Task.id)
+                )
+            ).first()
+            task_tags[block.task_name] = list(existing.tag_ids) if existing else []
+        return list(task_tags[block.task_name])
+
     rows: list[dict] = []
     for offset in range(7):
         day = monday + timedelta(days=offset)
@@ -402,13 +440,15 @@ async def preview_week(
                     "task_name": block.task_name,
                     "start_at": start.isoformat(timespec="seconds"),
                     "end_at": end.isoformat(timespec="seconds"),
-                    "tag_ids": list(block.tag_ids),
+                    "tag_ids": await tags_for(block),
                     "template_block_id": block.id,
                 }
             )
     rows.sort(key=lambda r: r["start_at"])
     return monday, rows
 ```
+
+Add `Task` to the model import and `TaskStatus` from `app.models.task`.
 
 The `update_block` signature replaces the one from the backend plan's Task 8, which took a full `TemplateBlockCreate`. `create_block` is unchanged.
 
@@ -454,7 +494,7 @@ In `backend/app/services/calendar.py`, the day dict emits `"minutes_by_primary_t
 - [ ] **Step 8: Run the full suite**
 
 Run: `cd Avery/backend && arch -arm64 .venv/bin/python -m pytest tests/ -q`
-Expected: PASS (141 tests)
+Expected: PASS (142 tests)
 
 - [ ] **Step 9: Commit**
 
@@ -658,7 +698,7 @@ Declare it before `GET /{task_id}` is not required — the paths differ — but 
 - [ ] **Step 6: Run the full suite**
 
 Run: `cd Avery/backend && arch -arm64 .venv/bin/python -m pytest tests/ -q`
-Expected: PASS (144 tests)
+Expected: PASS (145 tests)
 
 - [ ] **Step 7: Commit**
 
@@ -2244,4 +2284,4 @@ Backlog items deliberately still open: `Event.template_block_id` as a real FK; t
 
 **Type consistency:** `Segment` is defined in Task 6 and consumed in Tasks 7–8. `AveryEvent` avoids colliding with the DOM `Event` type and is used consistently. `formatLocal` is the only path for outbound datetimes, defined in Task 5 and used in Tasks 8, 10, 13. `qk` keys defined in Task 5 are the same strings invalidated in Task 8. `TaskStats` and `PreviewResult` are produced by Phase A and typed in Task 5's `types.ts`. The backend's `minutes_by_primary_tag` rename in Task 2 matches the `MonthDay` and `Metrics` interfaces in Task 5.
 
-**Test counts:** backend 133 → 137 (Task 1) → 141 (Task 2) → 144 (Task 3). Frontend 5 (Task 5) → 15 (Task 6) → 22 (Task 8).
+**Test counts:** backend 133 → 137 (Task 1) → 142 (Task 2) → 145 (Task 3). Frontend 5 (Task 5) → 15 (Task 6) → 22 (Task 8).
