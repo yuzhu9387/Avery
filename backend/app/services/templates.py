@@ -5,9 +5,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Event, Template, TemplateBlock
 from app.models.event import EventSource
-from app.schemas.event import EventCreate
 from app.schemas.template import TemplateBlockCreate, TemplateCreate
 from app.services import events as event_service
+from app.services import tasks as task_service
 
 
 class NoActiveTemplate(Exception):
@@ -111,8 +111,14 @@ async def materialize_week(
 ) -> tuple[date, list[Event], list[date]]:
     """Create template events for the week containing `any_day`.
 
-    Days that already hold any event are skipped entirely, which makes this
-    idempotent: a missed Sunday followed by a lazy trigger cannot double-create.
+    Days that already hold any event are skipped entirely, so materialization never
+    merges into a day the user has already touched, and a re-run is a no-op.
+
+    **The whole week's events land in a single commit.** Committing per event would
+    let an interrupted run leave a day half-filled — and because the guard above skips
+    any day holding *any* event, that day would then be skipped forever, permanently
+    missing its remaining blocks. Task 13 runs this unattended from cron, so that
+    failure mode has to be impossible rather than merely unlikely.
     """
     if template is None:
         template = await get_active_template(session)
@@ -121,32 +127,46 @@ async def materialize_week(
 
     monday, next_monday = week_bounds(any_day)
     occupied = await _days_with_events(session, monday, next_monday)
-
-    created: list[Event] = []
     skipped = sorted(occupied)
 
+    wanted: list[tuple[date, TemplateBlock]] = []
     for offset in range(7):
         day = monday + timedelta(days=offset)
         if day in occupied:
             continue
         for block in template.blocks:
-            if day.isoweekday() not in block.days:
-                continue
-            start = datetime.combine(day, block.start_time)
-            end = datetime.combine(day, block.end_time)
-            if end <= start:  # crosses midnight
-                end += timedelta(days=1)
-            event = await event_service.create_event(
-                session,
-                EventCreate(
-                    task_name=block.task_name,
-                    start_at=start,
-                    end_at=end,
-                    tag_ids=list(block.tag_ids),
-                    source=EventSource.TEMPLATE,
-                    template_block_id=block.id,
-                ),
+            if day.isoweekday() in block.days:
+                wanted.append((day, block))
+
+    # Resolve every task name FIRST. find_or_create_by_name commits, and a commit
+    # flushes whatever else is pending in the session — so no Event may exist in the
+    # session while these run, or the "single commit" guarantee is silently broken.
+    tasks_by_name: dict[str, int] = {}
+    for _, block in wanted:
+        if block.task_name not in tasks_by_name:
+            task = await task_service.find_or_create_by_name(
+                session, block.task_name, list(block.tag_ids)
             )
-            created.append(event)
+            tasks_by_name[block.task_name] = task.id
+
+    created: list[Event] = []
+    for day, block in wanted:
+        start = datetime.combine(day, block.start_time)
+        end = datetime.combine(day, block.end_time)
+        if end <= start:  # crosses midnight
+            end += timedelta(days=1)
+        event = Event(
+            task_id=tasks_by_name[block.task_name],
+            start_at=start,
+            end_at=end,
+            tag_ids=list(block.tag_ids),
+            source=EventSource.TEMPLATE,
+            template_block_id=block.id,
+        )
+        session.add(event)
+        created.append(event)
+
+    if created:
+        await session.commit()
 
     return monday, created, skipped

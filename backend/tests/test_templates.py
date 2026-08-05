@@ -102,6 +102,38 @@ async def test_any_date_in_the_week_resolves_to_its_monday(client):
     assert result.json()["week_start"] == "2026-08-03"
 
 
+async def test_week_is_materialized_in_a_single_commit(client, session):
+    """All of a week's events land in one commit. Per-event commits would let an
+    interrupted run half-fill a day, and the skip-if-any-event guard would then
+    skip that day forever, leaving its remaining blocks permanently missing."""
+    from sqlalchemy import func, select
+
+    from app.models import Event
+
+    await _template(client, [WEEKDAY_BLOCK, OVERNIGHT_BLOCK])
+
+    committed: list[int] = []
+    original_commit = session.commit
+
+    async def counting_commit():
+        await original_commit()
+        committed.append(
+            (await session.scalars(select(func.count()).select_from(Event))).one()
+        )
+
+    session.commit = counting_commit
+    try:
+        result = await client.post("/api/weeks/2026-08-03/materialize")
+    finally:
+        session.commit = original_commit
+
+    assert result.json()["created"] == 12  # 5 weekday + 7 overnight
+
+    # Task rows commit first (one per distinct name); every Event appears in one step.
+    jumps = [b - a for a, b in zip([0, *committed], committed)]
+    assert max(jumps) == 12, f"events arrived in multiple commits: {committed}"
+
+
 async def test_delete_block(client):
     template_id = await _template(client, [WEEKDAY_BLOCK])
     blocks = (await client.get(f"/api/templates/{template_id}")).json()["blocks"]
