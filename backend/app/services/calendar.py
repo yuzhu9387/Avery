@@ -24,9 +24,13 @@ async def get_week(
     end = datetime.combine(next_monday, datetime.min.time())
 
     rows = await event_service.list_events(session, start=start, end=end)
+    # An event bleeding in from the previous week is not the user having touched this
+    # one. Gating on overlap let a single Sunday-night block suppress the whole week's
+    # materialization, leaving a blank Monday.
+    starts_here = [e for e in rows if start <= e.start_at < end]
     materialized = False
 
-    if not rows and allow_materialize and _is_materializable(monday):
+    if not starts_here and allow_materialize and _is_materializable(monday):
         try:
             _, created, _ = await template_service.materialize_week(session, monday)
         except template_service.NoActiveTemplate:

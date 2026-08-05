@@ -12,6 +12,8 @@ export function EventBlock({
   title,
   onPointerDownMove,
   onPointerDownResize,
+  isDragging,
+  dragOffset,
 }: {
   event: AveryEvent
   segment: Segment
@@ -19,6 +21,12 @@ export function EventBlock({
   title: string
   onPointerDownMove?: (e: React.PointerEvent) => void
   onPointerDownResize?: (e: React.PointerEvent, edge: 'start' | 'end') => void
+  /** True while this block is the one being dragged, so it can read as "lifted"
+   *  above the drop target underneath rather than indistinguishable from it. */
+  isDragging?: boolean
+  /** Live pixel offset for a move drag. Resize previews adjust top/height instead
+   *  (computed by the caller), so this stays undefined during a resize. */
+  dragOffset?: { dx: number; dy: number }
 }) {
   const color = tag?.color ?? 'var(--pale)'
   return (
@@ -33,7 +41,10 @@ export function EventBlock({
         borderTopRightRadius: segment.isStart ? 6 : 0,
         borderBottomLeftRadius: segment.isEnd ? 6 : 0,
         borderBottomRightRadius: segment.isEnd ? 6 : 0,
-        cursor: onPointerDownMove ? 'grab' : 'default',
+        cursor: isDragging ? 'grabbing' : onPointerDownMove ? 'grab' : 'default',
+        transform: dragOffset ? `translate(${dragOffset.dx}px, ${dragOffset.dy}px)` : undefined,
+        zIndex: isDragging ? 20 : undefined,
+        opacity: isDragging ? 0.85 : undefined,
       }}
       onPointerDown={onPointerDownMove}
     >

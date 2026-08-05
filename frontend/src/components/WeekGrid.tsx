@@ -1,4 +1,5 @@
 import type { AveryEvent, Tag, Task } from '../api/types'
+import type { DragDraft } from '../hooks/useEventDrag'
 import { addDays, formatDate, parseLocal } from '../lib/datetime'
 import {
   GRID,
@@ -30,6 +31,7 @@ export function WeekGrid({
   taskMap,
   onEventPointerDownMove,
   onEventPointerDownResize,
+  draft,
 }: {
   weekStart: Date
   events: AveryEvent[]
@@ -40,6 +42,8 @@ export function WeekGrid({
     event: AveryEvent,
     segment: Segment,
   ) => (e: React.PointerEvent, edge: 'start' | 'end') => void
+  /** The event mid-drag, if any, and its live pixel offset. */
+  draft?: DragDraft | null
 }) {
   const marks = hourMarks()
   const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i))
@@ -135,17 +139,38 @@ export function WeekGrid({
                     style={{ top: minutesToPx(nowMinutes), background: 'var(--rose-deep)' }}
                   />
                 )}
-                {segmentsByDay[dayIndex].map(({ event, segment }) => (
-                  <EventBlock
-                    key={`${event.id}-${segment.dayIndex}`}
-                    event={event}
-                    segment={segment}
-                    tag={tagMap.get(event.tag_ids[0])}
-                    title={taskMap.get(event.task_id)?.name ?? `Task #${event.task_id}`}
-                    onPointerDownMove={onEventPointerDownMove?.(event, segment)}
-                    onPointerDownResize={onEventPointerDownResize?.(event, segment)}
-                  />
-                ))}
+                {segmentsByDay[dayIndex].map(({ event, segment }) => {
+                  const isDragging = draft?.eventId === event.id
+                  let renderSegment = segment
+                  let dragOffset: { dx: number; dy: number } | undefined
+
+                  if (isDragging && draft) {
+                    if (draft.kind === 'move') {
+                      dragOffset = { dx: draft.dx, dy: draft.dy }
+                    } else if (draft.edge === 'end') {
+                      const heightPx = Math.max(GRID.minBlockPx, segment.heightPx + draft.dy)
+                      renderSegment = { ...segment, heightPx }
+                    } else {
+                      const heightPx = Math.max(GRID.minBlockPx, segment.heightPx - draft.dy)
+                      const topPx = segment.topPx + (segment.heightPx - heightPx)
+                      renderSegment = { ...segment, topPx, heightPx }
+                    }
+                  }
+
+                  return (
+                    <EventBlock
+                      key={`${event.id}-${segment.dayIndex}`}
+                      event={event}
+                      segment={renderSegment}
+                      tag={tagMap.get(event.tag_ids[0])}
+                      title={taskMap.get(event.task_id)?.name ?? `Task #${event.task_id}`}
+                      onPointerDownMove={onEventPointerDownMove?.(event, segment)}
+                      onPointerDownResize={onEventPointerDownResize?.(event, segment)}
+                      isDragging={isDragging}
+                      dragOffset={dragOffset}
+                    />
+                  )
+                })}
               </div>
             )
           })}

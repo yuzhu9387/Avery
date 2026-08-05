@@ -8,6 +8,7 @@ import { materializeWeek } from '../api/templates'
 import type { Task } from '../api/types'
 import { RatioBars } from '../components/RatioBars'
 import { WeekGrid } from '../components/WeekGrid'
+import { useEventDrag } from '../hooks/useEventDrag'
 import { useTagMap } from '../hooks/useTags'
 import { useWeek, useWeekRatios } from '../hooks/useWeek'
 import { addDays, formatDate, mondayOf } from '../lib/datetime'
@@ -32,6 +33,7 @@ export default function WeekPage() {
   const week = useWeek(monday)
   const ratios = useWeekRatios(monday)
   const tagMap = useTagMap()
+  const { draft, onPointerDownMove, onPointerDownResize } = useEventDrag()
 
   const tasksQuery = useQuery({
     // Archived tasks are included for the same reason useTagMap includes archived
@@ -135,7 +137,15 @@ export default function WeekPage() {
           {week.isLoading && <p className="p-4 text-sm text-ink-faint">Loading week…</p>}
           {week.isError && <p className="p-4 text-sm text-ink-faint">Couldn't load this week.</p>}
           {week.isSuccess && (
-            <WeekGrid weekStart={monday} events={events} tagMap={tagMap} taskMap={taskMap} />
+            <WeekGrid
+              weekStart={monday}
+              events={events}
+              tagMap={tagMap}
+              taskMap={taskMap}
+              onEventPointerDownMove={onPointerDownMove}
+              onEventPointerDownResize={onPointerDownResize}
+              draft={draft}
+            />
           )}
         </div>
       </div>

@@ -9,9 +9,11 @@ WEEKDAY_BLOCK = {
 }
 
 
-async def _template(client):
+async def _template(client, blocks=None):
     template_id = (await client.post("/api/templates", json={"name": "Default"})).json()["id"]
-    await client.post(f"/api/templates/{template_id}/blocks", json=WEEKDAY_BLOCK)
+    for block in blocks or [WEEKDAY_BLOCK]:
+        await client.post(f"/api/templates/{template_id}/blocks", json=block)
+    return template_id
 
 
 def _this_monday() -> date:
@@ -132,3 +134,25 @@ async def test_materialized_is_false_when_the_template_creates_nothing(client):
     body = (await client.get(f"/api/weeks/{monday.isoformat()}")).json()
     assert body["events"] == []
     assert body["materialized"] is False
+
+
+async def test_an_event_bleeding_in_does_not_suppress_the_week(client):
+    """Gating materialization on overlap let one Sunday-night block from the previous
+    week blank the entire following week."""
+    await _template(client, [WEEKDAY_BLOCK])
+    monday = _this_monday()
+    prev_sunday = monday - timedelta(days=1)
+
+    await client.post(
+        "/api/events",
+        json={
+            "task_name": "Late night",
+            "start_at": f"{prev_sunday.isoformat()}T22:00:00",
+            "end_at": f"{monday.isoformat()}T02:00:00",
+        },
+    )
+
+    body = (await client.get(f"/api/weeks/{monday.isoformat()}")).json()
+    assert body["materialized"] is True
+    # Monday itself is skipped because the bleed occupies it; the other four weekdays fill.
+    assert len(body["events"]) == 5  # 4 materialized + the bled-over one
