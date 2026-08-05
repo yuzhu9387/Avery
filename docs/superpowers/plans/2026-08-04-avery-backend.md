@@ -16,6 +16,7 @@
 - Database is SQLite at `Avery/data/avery.db`. `DATABASE_URL` default: `sqlite+aiosqlite:///data/avery.db`.
 - **All datetimes are naive local time.** Never call `datetime.now(tz=...)`, never store tzinfo. The spec accepts this limitation explicitly.
 - Business logic goes in `app/services/`. Routers contain no logic beyond serialization and HTTP status. This is the single most important structural rule in the plan.
+- **SQLite foreign keys must be switched on explicitly.** SQLite ignores `REFERENCES … ON DELETE CASCADE` unless `PRAGMA foreign_keys=ON`, and the default is OFF — so every `ondelete="CASCADE"` in this schema is inert without it. Deleting a Task would strand its Events and Reminders pointing at a row that no longer exists: orphan events that render on the calendar and 404 when opened, orphan reminders handed to the dispatcher. `app/database.py` exposes `enable_sqlite_foreign_keys(engine)` and calls it for the app engine; `tests/conftest.py` calls it for the in-memory engine so the tests actually exercise the cascades.
 - `app/services/analytics.py` performs **no I/O and imports no ORM models**. It operates on plain dataclasses only.
 - Tag lists are stored as JSON arrays of ints. `tag_ids[0]` is the primary tag and drives both color and analytics attribution.
 - **Rules are never mutated in place.** Editing closes the current row (`effective_to`) and inserts a new one.
@@ -140,12 +141,35 @@ settings = Settings()
 ```python
 from collections.abc import AsyncIterator
 
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy import event
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
 from app.config import settings
 
+
+def enable_sqlite_foreign_keys(target: AsyncEngine) -> None:
+    """Switch on SQLite's foreign-key enforcement for every new connection.
+
+    SQLite ships with `PRAGMA foreign_keys` OFF, and while it is off every
+    `ondelete="CASCADE"` in this schema is silently inert. Deleting a Task would
+    strand its Events and Reminders pointing at a vanished row.
+
+    Called for the app engine below and, in tests, for the in-memory engine — the
+    pragma is per-connection, so registering it in one place is not enough.
+    """
+    if not target.url.get_backend_name().startswith("sqlite"):
+        return
+
+    @event.listens_for(target.sync_engine, "connect")
+    def _set_pragma(dbapi_connection, _record):  # pragma: no cover - driver callback
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
+
 engine = create_async_engine(settings.resolved_database_url(), echo=False)
+enable_sqlite_foreign_keys(engine)
 SessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
@@ -195,13 +219,16 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 import app.models  # noqa: F401  — registers every model on Base.metadata
-from app.database import Base, get_session
+from app.database import Base, enable_sqlite_foreign_keys, get_session
 from app.main import app as fastapi_app
 
 
 @pytest_asyncio.fixture
 async def engine():
     eng = create_async_engine("sqlite+aiosqlite:///:memory:")
+    # Without this the tests run with FK enforcement off while production has it on,
+    # so no cascade is ever exercised and orphan rows look fine.
+    enable_sqlite_foreign_keys(eng)
     async with eng.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     yield eng
@@ -1168,6 +1195,24 @@ async def test_explicit_null_on_non_nullable_field_is_422_not_500(client):
         assert patched.status_code == 422, field
 
 
+async def test_deleting_a_task_removes_its_events(client):
+    """The cascade is only real with SQLite's foreign_keys pragma on. Orphan events
+    would still render on the calendar and 404 when their card is opened."""
+    task_id = await _task(client, "Doomed")
+    await client.post(
+        "/api/events",
+        json={
+            "task_id": task_id,
+            "start_at": "2026-08-03T09:00:00",
+            "end_at": "2026-08-03T10:00:00",
+        },
+    )
+    assert len((await client.get("/api/events")).json()) == 1
+
+    assert (await client.delete(f"/api/tasks/{task_id}")).status_code == 204
+    assert (await client.get("/api/events")).json() == []
+
+
 async def test_delete_event(client):
     task_id = await _task(client)
     event_id = (
@@ -1492,7 +1537,7 @@ app.include_router(events_router.router)
 - [ ] **Step 9: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (28 tests)
+Expected: PASS (29 tests)
 
 - [ ] **Step 10: Commit**
 
@@ -1802,7 +1847,7 @@ app.include_router(rules_router.router)
 - [ ] **Step 9: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (33 tests)
+Expected: PASS (34 tests)
 
 - [ ] **Step 10: Commit**
 
@@ -2328,7 +2373,7 @@ Expected: PASS (21 tests)
 - [ ] **Step 5: Run the whole suite**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (54 tests)
+Expected: PASS (55 tests)
 
 - [ ] **Step 6: Commit**
 
@@ -2566,7 +2611,7 @@ app.include_router(analytics_router.router)
 - [ ] **Step 6: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (59 tests)
+Expected: PASS (60 tests)
 
 - [ ] **Step 7: Commit**
 
@@ -3171,7 +3216,7 @@ app.include_router(templates_router.week_router)
 - [ ] **Step 9: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (70 tests)
+Expected: PASS (71 tests)
 
 - [ ] **Step 10: Commit**
 
@@ -3495,7 +3540,7 @@ Register this **after** `templates_router.week_router` — both use the `/api/we
 - [ ] **Step 6: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (81 tests)
+Expected: PASS (82 tests)
 
 - [ ] **Step 7: Commit**
 
@@ -3922,7 +3967,7 @@ app.include_router(reports_router.router)
 - [ ] **Step 9: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (92 tests)
+Expected: PASS (93 tests)
 
 - [ ] **Step 10: Commit**
 
@@ -4047,6 +4092,24 @@ async def test_explicit_null_on_non_nullable_field_is_422_not_500(client):
     )
     assert undismissed.status_code == 200
     assert undismissed.json()["dismissed_at"] is None
+
+
+async def test_deleting_a_task_removes_its_reminders(client, session):
+    """SQLite ignores ON DELETE CASCADE unless the foreign_keys pragma is on. Without
+    it a deleted task leaves live reminders behind, and the dispatcher fires them for
+    a task that no longer exists."""
+    from datetime import datetime
+
+    task_id = await _task(client)
+    await client.post(
+        "/api/reminders", json={"task_id": task_id, "remind_at": "2026-08-01T09:00:00"}
+    )
+    assert len(await service.list_due(session, datetime(2026, 8, 10, 12, 0))) == 1
+
+    assert (await client.delete(f"/api/tasks/{task_id}")).status_code == 204
+
+    assert await service.list_due(session, datetime(2026, 8, 10, 12, 0)) == []
+    assert (await client.get("/api/reminders")).json() == []
 
 
 async def test_delete_reminder(client):
@@ -4306,7 +4369,7 @@ app.include_router(reminders_router.router)
 - [ ] **Step 9: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (100 tests)
+Expected: PASS (102 tests)
 
 - [ ] **Step 10: Commit**
 
@@ -4563,7 +4626,7 @@ app.include_router(seed_router.router)
 - [ ] **Step 6: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (105 tests)
+Expected: PASS (107 tests)
 
 If `test_seeded_week_materializes_and_matches_631_shape` reports A/B verdicts other than `pass`, the seed block times are wrong — recheck them against the table in Step 3 before changing the analytics engine. The engine is proven by Task 6's tests.
 
@@ -4781,7 +4844,7 @@ app = FastAPI(title="Avery", version="0.1.0", lifespan=lifespan)
 - [ ] **Step 5: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (110 tests)
+Expected: PASS (112 tests)
 
 - [ ] **Step 6: Verify the server actually boots**
 
@@ -4913,7 +4976,7 @@ Creates the eight tags, the 6:3:1 rule, and the default weekly template.
 - [ ] **Step 6: Run the full suite one last time**
 
 Run: `cd backend && .venv/bin/pytest -v`
-Expected: PASS (110 tests)
+Expected: PASS (112 tests)
 
 - [ ] **Step 7: Commit**
 
