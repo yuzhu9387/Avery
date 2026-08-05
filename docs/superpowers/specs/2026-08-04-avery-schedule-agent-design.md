@@ -31,7 +31,10 @@ agent, is how the user drives all of it without clicking.
 ### Non-goals
 
 Multi-user accounts, timezone handling, recurrence rules beyond the template,
-drag-to-resize, mobile apps, calendar import/export.
+mobile apps, calendar import/export.
+
+*(drag-to-resize was originally a non-goal; it was pulled into scope when Plan 2 was
+commissioned, so the week grid supports both moving and resizing.)*
 
 ---
 
@@ -368,8 +371,8 @@ the job idempotent, so a missed Sunday followed by a lazy trigger cannot double-
 ### Week — default route
 
 7-column time grid, Google-Calendar-style, 06:00–24:00 with scroll. `‹ › Today` at
-top-left. Events are colored blocks positioned by time, drag-to-move (snapping to 15 min),
-click → Task detail. A left rail shows the week's group totals against the rule's bands as
+top-left. Events are colored blocks positioned by time, **drag-to-move and drag-to-resize**
+(both snapping to 15 min), click → Task detail. A left rail shows the week's group totals against the rule's bands as
 three slim bars — the rule is visible continuously, not only at month end.
 
 ### Month
