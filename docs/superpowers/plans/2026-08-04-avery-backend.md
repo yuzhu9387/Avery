@@ -2694,6 +2694,27 @@ async def test_any_date_in_the_week_resolves_to_its_monday(client):
     assert result.json()["week_start"] == "2026-08-03"
 
 
+async def test_untagged_block_inherits_the_task_tags(client):
+    """Tags drive the whole 6:3:1 analytic. A block carrying no tags of its own must
+    inherit the task's, or its events land in "unassigned" and disappear from every
+    ratio — wrong in the one direction nobody notices."""
+    tag_id = (
+        await client.post("/api/tags", json={"name": "Deep work", "color": "#DA96A4"})
+    ).json()["id"]
+    await client.post("/api/tasks", json={"name": "Work", "tag_ids": [tag_id]})
+
+    await _template(client, [WEEKDAY_BLOCK])  # WEEKDAY_BLOCK declares tag_ids: []
+    await client.post("/api/weeks/2026-08-03/materialize")
+
+    events = (
+        await client.get(
+            "/api/events", params={"start": "2026-08-03T00:00:00", "end": "2026-08-10T00:00:00"}
+        )
+    ).json()
+    assert len(events) == 5
+    assert all(e["tag_ids"] == [tag_id] for e in events)
+
+
 async def test_week_is_materialized_in_a_single_commit(client, session):
     """All of a week's events land in one commit. Per-event commits would let an
     interrupted run half-fill a day, and the skip-if-any-event guard would then
@@ -2866,7 +2887,7 @@ from datetime import date, datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Event, Template, TemplateBlock
+from app.models import Event, Task, Template, TemplateBlock
 from app.models.event import EventSource
 from app.schemas.template import TemplateBlockCreate, TemplateCreate
 from app.services import events as event_service
@@ -3004,25 +3025,29 @@ async def materialize_week(
     # Resolve every task name FIRST. find_or_create_by_name commits, and a commit
     # flushes whatever else is pending in the session — so no Event may exist in the
     # session while these run, or the "single commit" guarantee is silently broken.
-    tasks_by_name: dict[str, int] = {}
+    tasks_by_name: dict[str, Task] = {}
     for _, block in wanted:
         if block.task_name not in tasks_by_name:
-            task = await task_service.find_or_create_by_name(
+            tasks_by_name[block.task_name] = await task_service.find_or_create_by_name(
                 session, block.task_name, list(block.tag_ids)
             )
-            tasks_by_name[block.task_name] = task.id
 
     created: list[Event] = []
     for day, block in wanted:
+        task = tasks_by_name[block.task_name]
         start = datetime.combine(day, block.start_time)
         end = datetime.combine(day, block.end_time)
         if end <= start:  # crosses midnight
             end += timedelta(days=1)
         event = Event(
-            task_id=tasks_by_name[block.task_name],
+            task_id=task.id,
             start_at=start,
             end_at=end,
-            tag_ids=list(block.tag_ids),
+            # Mirrors create_event: a block carrying no tags of its own inherits the
+            # task's. Building Event directly is exactly where this fallback gets
+            # lost, and an untagged event falls into "unassigned" — silently absent
+            # from every 6:3:1 ratio rather than visibly wrong.
+            tag_ids=list(block.tag_ids) or list(task.tag_ids),
             source=EventSource.TEMPLATE,
             template_block_id=block.id,
         )
@@ -3146,7 +3171,7 @@ app.include_router(templates_router.week_router)
 - [ ] **Step 9: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (69 tests)
+Expected: PASS (70 tests)
 
 - [ ] **Step 10: Commit**
 
@@ -3425,7 +3450,7 @@ Register this **after** `templates_router.week_router` — both use the `/api/we
 - [ ] **Step 6: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (78 tests)
+Expected: PASS (79 tests)
 
 - [ ] **Step 7: Commit**
 
@@ -3800,7 +3825,7 @@ app.include_router(reports_router.router)
 - [ ] **Step 9: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (87 tests)
+Expected: PASS (88 tests)
 
 - [ ] **Step 10: Commit**
 
@@ -4184,7 +4209,7 @@ app.include_router(reminders_router.router)
 - [ ] **Step 9: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (95 tests)
+Expected: PASS (96 tests)
 
 - [ ] **Step 10: Commit**
 
@@ -4441,7 +4466,7 @@ app.include_router(seed_router.router)
 - [ ] **Step 6: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (100 tests)
+Expected: PASS (101 tests)
 
 If `test_seeded_week_materializes_and_matches_631_shape` reports A/B verdicts other than `pass`, the seed block times are wrong — recheck them against the table in Step 3 before changing the analytics engine. The engine is proven by Task 6's tests.
 
@@ -4659,7 +4684,7 @@ app = FastAPI(title="Avery", version="0.1.0", lifespan=lifespan)
 - [ ] **Step 5: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (105 tests)
+Expected: PASS (106 tests)
 
 - [ ] **Step 6: Verify the server actually boots**
 
@@ -4791,7 +4816,7 @@ Creates the eight tags, the 6:3:1 rule, and the default weekly template.
 - [ ] **Step 6: Run the full suite one last time**
 
 Run: `cd backend && .venv/bin/pytest -v`
-Expected: PASS (105 tests)
+Expected: PASS (106 tests)
 
 - [ ] **Step 7: Commit**
 
