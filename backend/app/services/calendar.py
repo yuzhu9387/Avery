@@ -28,12 +28,16 @@ async def get_week(
 
     if not rows and allow_materialize and _is_materializable(monday):
         try:
-            await template_service.materialize_week(session, monday)
+            _, created, _ = await template_service.materialize_week(session, monday)
         except template_service.NoActiveTemplate:
             pass
         else:
-            materialized = True
-            rows = await event_service.list_events(session, start=start, end=end)
+            # `materialized` must mean "events were created", not merely "no exception
+            # was raised". A template with no blocks matching this week legitimately
+            # creates nothing, and reporting true there tells the UI a lie.
+            materialized = bool(created)
+            if created:
+                rows = await event_service.list_events(session, start=start, end=end)
 
     return {
         "week_start": monday.isoformat(),
@@ -56,6 +60,7 @@ async def get_month(session: AsyncSession, year: int, month: int) -> dict:
 
     per_day: dict[date, dict[int, int]] = {}
     counts: dict[date, int] = {}
+    totals: dict[date, int] = {}
     for row in rows:
         slice_ = EventSlice(
             id=row.id, start_at=row.start_at, end_at=row.end_at, tag_ids=tuple(row.tag_ids)
@@ -65,6 +70,10 @@ async def get_month(session: AsyncSession, year: int, month: int) -> dict:
             if not (first <= day < last_exclusive):
                 continue
             counts[day] = counts.get(day, 0) + 1
+            # Accumulate the day's total independently of the per-tag buckets.
+            # Deriving it from those buckets drops every untagged event's minutes,
+            # producing day cells that read "1 event, 0 minutes".
+            totals[day] = totals.get(day, 0) + minutes
             if tag_id is None:
                 continue
             bucket = per_day.setdefault(day, {})
@@ -78,7 +87,7 @@ async def get_month(session: AsyncSession, year: int, month: int) -> dict:
             {
                 "date": day.isoformat(),
                 "event_count": counts.get(day, 0),
-                "total_minutes": sum(minutes_by_tag.values()),
+                "total_minutes": totals.get(day, 0),
                 "minutes_by_tag": {str(k): v for k, v in sorted(minutes_by_tag.items())},
             }
         )

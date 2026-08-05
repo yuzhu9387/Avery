@@ -100,3 +100,35 @@ async def test_month_payload_covers_every_day(client):
 
 async def test_bad_month_format_returns_422(client):
     assert (await client.get("/api/months/2026-13")).status_code == 422
+    # "0000-01" satisfies the regex but date(0, ...) raises — must still be 422.
+    assert (await client.get("/api/months/0000-01")).status_code == 422
+
+
+async def test_untagged_events_still_count_toward_total_minutes(client):
+    """total_minutes must not be derived from the per-tag buckets — untagged events
+    would contribute nothing and the cell would read "1 event, 0 minutes"."""
+    await client.post(
+        "/api/events",
+        json={
+            "task_name": "Untagged block",
+            "start_at": "2026-08-03T09:00:00",
+            "end_at": "2026-08-03T16:00:00",
+            "tag_ids": [],
+        },
+    )
+    days = {d["date"]: d for d in (await client.get("/api/months/2026-08")).json()["days"]}
+    cell = days["2026-08-03"]
+    assert cell["event_count"] == 1
+    assert cell["total_minutes"] == 420
+    assert cell["minutes_by_tag"] == {}
+
+
+async def test_materialized_is_false_when_the_template_creates_nothing(client):
+    """An active template with no block matching this week legitimately creates
+    zero events. Reporting materialized: true there tells the UI a lie."""
+    await client.post("/api/templates", json={"name": "Empty"})
+    monday = _this_monday()
+
+    body = (await client.get(f"/api/weeks/{monday.isoformat()}")).json()
+    assert body["events"] == []
+    assert body["materialized"] is False

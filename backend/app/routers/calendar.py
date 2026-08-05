@@ -31,4 +31,8 @@ async def get_month(month_key: str, session: AsyncSession = Depends(get_session)
     year, month = int(match.group(1)), int(match.group(2))
     if not 1 <= month <= 12:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "month must be 01-12")
+    # "0000-01" satisfies the regex but date(0, ...) raises, turning a malformed
+    # key into a 500 on an endpoint whose whole contract is to 422 on bad input.
+    if not 1 <= year <= 9999:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "year must be 0001-9999")
     return await service.get_month(session, year, month)
