@@ -3,7 +3,7 @@ from datetime import date, datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Event, Template, TemplateBlock
+from app.models import Event, Task, Template, TemplateBlock
 from app.models.event import EventSource
 from app.schemas.template import TemplateBlockCreate, TemplateCreate
 from app.services import events as event_service
@@ -141,25 +141,29 @@ async def materialize_week(
     # Resolve every task name FIRST. find_or_create_by_name commits, and a commit
     # flushes whatever else is pending in the session — so no Event may exist in the
     # session while these run, or the "single commit" guarantee is silently broken.
-    tasks_by_name: dict[str, int] = {}
+    tasks_by_name: dict[str, Task] = {}
     for _, block in wanted:
         if block.task_name not in tasks_by_name:
-            task = await task_service.find_or_create_by_name(
+            tasks_by_name[block.task_name] = await task_service.find_or_create_by_name(
                 session, block.task_name, list(block.tag_ids)
             )
-            tasks_by_name[block.task_name] = task.id
 
     created: list[Event] = []
     for day, block in wanted:
+        task = tasks_by_name[block.task_name]
         start = datetime.combine(day, block.start_time)
         end = datetime.combine(day, block.end_time)
         if end <= start:  # crosses midnight
             end += timedelta(days=1)
         event = Event(
-            task_id=tasks_by_name[block.task_name],
+            task_id=task.id,
             start_at=start,
             end_at=end,
-            tag_ids=list(block.tag_ids),
+            # Mirrors create_event: a block carrying no tags of its own inherits the
+            # task's. Building Event directly is exactly where this fallback gets
+            # lost, and an untagged event falls into "unassigned" — silently absent
+            # from every 6:3:1 ratio rather than visibly wrong.
+            tag_ids=list(block.tag_ids) or list(task.tag_ids),
             source=EventSource.TEMPLATE,
             template_block_id=block.id,
         )

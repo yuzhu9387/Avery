@@ -102,6 +102,27 @@ async def test_any_date_in_the_week_resolves_to_its_monday(client):
     assert result.json()["week_start"] == "2026-08-03"
 
 
+async def test_untagged_block_inherits_the_task_tags(client):
+    """Tags drive the whole 6:3:1 analytic. A block carrying no tags of its own must
+    inherit the task's, or its events land in "unassigned" and disappear from every
+    ratio — wrong in the one direction nobody notices."""
+    tag_id = (
+        await client.post("/api/tags", json={"name": "Deep work", "color": "#DA96A4"})
+    ).json()["id"]
+    await client.post("/api/tasks", json={"name": "Work", "tag_ids": [tag_id]})
+
+    await _template(client, [WEEKDAY_BLOCK])  # WEEKDAY_BLOCK declares tag_ids: []
+    await client.post("/api/weeks/2026-08-03/materialize")
+
+    events = (
+        await client.get(
+            "/api/events", params={"start": "2026-08-03T00:00:00", "end": "2026-08-10T00:00:00"}
+        )
+    ).json()
+    assert len(events) == 5
+    assert all(e["tag_ids"] == [tag_id] for e in events)
+
+
 async def test_week_is_materialized_in_a_single_commit(client, session):
     """All of a week's events land in one commit. Per-event commits would let an
     interrupted run half-fill a day, and the skip-if-any-event guard would then
