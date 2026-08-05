@@ -5,13 +5,14 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 import app.models  # noqa: F401  — registers every model on Base.metadata
-from app.database import Base, get_session
+from app.database import Base, enable_sqlite_foreign_keys, get_session
 from app.main import app as fastapi_app
 
 
 @pytest_asyncio.fixture
 async def engine():
     eng = create_async_engine("sqlite+aiosqlite:///:memory:")
+    enable_sqlite_foreign_keys(eng)
     async with eng.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     yield eng

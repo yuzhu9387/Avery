@@ -182,6 +182,24 @@ async def test_range_filter_excludes_exact_boundaries(client):
     assert [e["start_at"] for e in listed.json()] == ["2026-08-03T09:00:00"]
 
 
+async def test_deleting_a_task_removes_its_events(client):
+    """The cascade is only real with SQLite's foreign_keys pragma on. Orphan events
+    would still render on the calendar and 404 when their card is opened."""
+    task_id = await _task(client, "Doomed")
+    await client.post(
+        "/api/events",
+        json={
+            "task_id": task_id,
+            "start_at": "2026-08-03T09:00:00",
+            "end_at": "2026-08-03T10:00:00",
+        },
+    )
+    assert len((await client.get("/api/events")).json()) == 1
+
+    assert (await client.delete(f"/api/tasks/{task_id}")).status_code == 204
+    assert (await client.get("/api/events")).json() == []
+
+
 async def test_delete_event(client):
     task_id = await _task(client)
     event_id = (

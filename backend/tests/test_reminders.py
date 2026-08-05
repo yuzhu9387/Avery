@@ -101,6 +101,24 @@ async def test_explicit_null_on_non_nullable_field_is_422_not_500(client):
     assert undismissed.json()["dismissed_at"] is None
 
 
+async def test_deleting_a_task_removes_its_reminders(client, session):
+    """SQLite ignores ON DELETE CASCADE unless the foreign_keys pragma is on. Without
+    it a deleted task leaves live reminders behind, and the dispatcher fires them for
+    a task that no longer exists."""
+    from datetime import datetime
+
+    task_id = await _task(client)
+    await client.post(
+        "/api/reminders", json={"task_id": task_id, "remind_at": "2026-08-01T09:00:00"}
+    )
+    assert len(await service.list_due(session, datetime(2026, 8, 10, 12, 0))) == 1
+
+    assert (await client.delete(f"/api/tasks/{task_id}")).status_code == 204
+
+    assert await service.list_due(session, datetime(2026, 8, 10, 12, 0)) == []
+    assert (await client.get("/api/reminders")).json() == []
+
+
 async def test_delete_reminder(client):
     task_id = await _task(client)
     reminder_id = (
