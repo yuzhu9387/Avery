@@ -76,11 +76,7 @@ async def find_or_create_by_name(
     existing = (await session.scalars(stmt)).first()
     if existing is not None:
         return existing
-    # A task created as a side effect of naming has no schedule of its own yet, so
-    # floating is the honest state. Materialization and event creation attach events
-    # to it immediately afterwards, and having events is what moves it into the
-    # Scheduled section regardless of this flag.
-    task = Task(name=name, tag_ids=list(tag_ids), is_floating=True)
+    task = Task(name=name, tag_ids=list(tag_ids))
     session.add(task)
     await session.commit()
     await session.refresh(task)

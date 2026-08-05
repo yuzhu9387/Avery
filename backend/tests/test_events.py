@@ -206,6 +206,29 @@ async def test_archiving_a_task_preserves_its_events(client):
     assert events[0]["task_id"] == task_id
 
 
+async def test_db_cascade_removes_events_when_a_task_row_is_deleted(client, session):
+    """The API archives tasks rather than deleting them, so ON DELETE CASCADE is only
+    reachable at the ORM level — and the SQLite foreign_keys pragma is the only thing
+    that makes it work. Without this test the pragma is entirely unverified."""
+    from app.models import Task
+
+    task_id = await _task(client, "Doomed")
+    await client.post(
+        "/api/events",
+        json={
+            "task_id": task_id,
+            "start_at": "2026-08-03T09:00:00",
+            "end_at": "2026-08-03T10:00:00",
+        },
+    )
+    assert len((await client.get("/api/events")).json()) == 1
+
+    await session.delete(await session.get(Task, task_id))
+    await session.commit()
+
+    assert (await client.get("/api/events")).json() == []
+
+
 async def test_patching_tag_ids_to_empty_inherits_task_tags(client):
     """update_event must treat an empty tag_ids the same way create_event does:
     as "inherit the task's", not "have none" — the identical regression class

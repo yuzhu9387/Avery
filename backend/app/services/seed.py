@@ -11,10 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import Rule, Tag, Template, TemplateBlock
 from app.schemas.rule import RuleCreate, RuleGroup
 from app.schemas.tag import TagCreate
-from app.schemas.template import TemplateCreate
 from app.services import rules as rule_service
 from app.services import tags as tag_service
-from app.services import templates as template_service
 
 SEED_TAGS: list[tuple[str, str, str]] = [
     # Colour family follows rule group, so the week grid reads as the ratio itself:
@@ -127,9 +125,9 @@ async def seed_all(session: AsyncSession) -> dict[str, int]:
         created["rules"] += 1
 
     if needs_template:
-        template = await template_service.create_template(
-            session, TemplateCreate(name="Default week")
-        )
+        template = Template(name="Default week", is_active=True)
+        session.add(template)
+        await session.flush()  # assigns template.id without committing
         for order, (days, start, end, task_name, tag_name) in enumerate(SEED_BLOCKS):
             session.add(
                 TemplateBlock(

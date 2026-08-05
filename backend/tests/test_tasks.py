@@ -104,27 +104,6 @@ async def test_delete_missing_task_is_404(client):
     assert (await client.delete("/api/tasks/999")).status_code == 404
 
 
-async def test_find_or_create_by_name_produces_a_floating_task(client, session):
-    """A task created as a side effect of naming (no schedule of its own yet) has
-    no events, so it belongs in neither Scheduled nor Floating unless it is
-    explicitly marked floating."""
-    from app.services import tasks as service
-
-    task = await service.find_or_create_by_name(session, "Side effect task", [])
-    assert task.is_floating is True
-
-    created = await client.post(
-        "/api/events",
-        json={
-            "task_name": "Side effect task",
-            "start_at": "2026-08-05T15:00:00",
-            "end_at": "2026-08-05T16:00:00",
-        },
-    )
-    assert created.status_code == 201
-    assert created.json()["task_id"] == task.id
-
-
 async def test_archiving_a_task_leaves_analytics_ratios_unchanged(client):
     """Archiving must not rewrite history: the minutes an archived task's events
     already contributed have to keep counting exactly as before."""
