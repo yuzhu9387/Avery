@@ -36,6 +36,12 @@ async def get_rule(rule_id: int, session: AsyncSession = Depends(get_session)):
 
 @router.delete("/{rule_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_rule(rule_id: int, session: AsyncSession = Depends(get_session)):
-    if not await service.delete_rule(session, rule_id):
+    try:
+        deleted = await service.delete_rule(session, rule_id)
+    except service.RuleInUse:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "rule is snapshotted by a report and cannot be deleted"
+        )
+    if not deleted:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "rule not found")
     return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -4,8 +4,12 @@ from datetime import date
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Rule
+from app.models import Report, Rule
 from app.schemas.rule import RuleCreate
+
+
+class RuleInUse(Exception):
+    """Raised when a rule cannot be deleted because a report snapshots it."""
 
 
 @dataclass(frozen=True)
@@ -85,6 +89,11 @@ async def delete_rule(session: AsyncSession, rule_id: int) -> bool:
     rule = await session.get(Rule, rule_id)
     if rule is None:
         return False
+    referencing = (
+        await session.scalars(select(Report.id).where(Report.rule_id == rule_id).limit(1))
+    ).first()
+    if referencing is not None:
+        raise RuleInUse(rule_id)
     await session.delete(rule)
     await session.commit()
     return True
