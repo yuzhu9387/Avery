@@ -7,6 +7,7 @@ from app.routers import events as events_router
 from app.routers import reminders as reminders_router
 from app.routers import reports as reports_router
 from app.routers import rules as rules_router
+from app.routers import seed as seed_router
 from app.routers import tags as tags_router
 from app.routers import tasks as tasks_router
 from app.routers import templates as templates_router
@@ -21,6 +22,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(seed_router.router)
 app.include_router(tags_router.router)
 app.include_router(tasks_router.router)
 app.include_router(reminders_router.router)
