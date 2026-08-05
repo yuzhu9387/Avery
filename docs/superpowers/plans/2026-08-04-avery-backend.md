@@ -3495,7 +3495,7 @@ Register this **after** `templates_router.week_router` — both use the `/api/we
 - [ ] **Step 6: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (82 tests)
+Expected: PASS (81 tests)
 
 - [ ] **Step 7: Commit**
 
@@ -3870,7 +3870,7 @@ app.include_router(reports_router.router)
 - [ ] **Step 9: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (91 tests)
+Expected: PASS (90 tests)
 
 - [ ] **Step 10: Commit**
 
@@ -4254,7 +4254,7 @@ app.include_router(reminders_router.router)
 - [ ] **Step 9: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (99 tests)
+Expected: PASS (98 tests)
 
 - [ ] **Step 10: Commit**
 
@@ -4511,7 +4511,7 @@ app.include_router(seed_router.router)
 - [ ] **Step 6: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (104 tests)
+Expected: PASS (103 tests)
 
 If `test_seeded_week_materializes_and_matches_631_shape` reports A/B verdicts other than `pass`, the seed block times are wrong — recheck them against the table in Step 3 before changing the analytics engine. The engine is proven by Task 6's tests.
 
@@ -4729,7 +4729,7 @@ app = FastAPI(title="Avery", version="0.1.0", lifespan=lifespan)
 - [ ] **Step 5: Run tests**
 
 Run: `cd backend && .venv/bin/pytest tests/ -v`
-Expected: PASS (109 tests)
+Expected: PASS (108 tests)
 
 - [ ] **Step 6: Verify the server actually boots**
 
@@ -4861,7 +4861,7 @@ Creates the eight tags, the 6:3:1 rule, and the default weekly template.
 - [ ] **Step 6: Run the full suite one last time**
 
 Run: `cd backend && .venv/bin/pytest -v`
-Expected: PASS (109 tests)
+Expected: PASS (108 tests)
 
 - [ ] **Step 7: Commit**
 
