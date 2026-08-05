@@ -88,7 +88,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.2.0", "pytest-asyncio>=0.23.0", "time-machine>=2.13"]
+dev = ["pytest>=8.2.0", "pytest-asyncio>=0.23.0"]
 
 [build-system]
 requires = ["setuptools>=68.0"]
@@ -5059,6 +5059,16 @@ Creates the eight tags, the 6:3:1 rule, and the default weekly template.
 
 ```bash
 .venv/bin/pytest -v
+```
+
+### If native imports fail with "incompatible architecture"
+
+On Apple Silicon the framework interpreter is a universal binary, so it can start as
+either `arm64` or `x86_64`. The installed wheels are `arm64`, so an `x86_64` launch fails
+on `pydantic_core` and any other compiled extension. Force the native architecture:
+
+```bash
+arch -arm64 .venv/bin/python -m pytest -v
 ```
 
 ## Migrations
