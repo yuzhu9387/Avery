@@ -251,3 +251,21 @@ async def test_preview_does_not_write_anything(client):
     assert body["events"][0]["start_at"] == "2026-08-03T09:30:00"
 
     assert (await client.get("/api/events")).json() == []
+
+
+async def test_preview_predicts_the_tags_that_will_be_created(client):
+    """A block declaring no tags inherits the task's at materialization, so the preview
+    must show those too. A preview that disagrees with what actually gets created is
+    worse than no preview at all."""
+    tag_id = (
+        await client.post("/api/tags", json={"name": "Deep", "color": "#DA96A4"})
+    ).json()["id"]
+    await client.post("/api/tasks", json={"name": "Work", "tag_ids": [tag_id]})
+    await _template(client, [WEEKDAY_BLOCK])  # WEEKDAY_BLOCK declares tag_ids: []
+
+    preview = (await client.get("/api/templates/active/preview/2026-08-03")).json()
+    assert preview["events"][0]["tag_ids"] == [tag_id]
+
+    await client.post("/api/weeks/2026-08-03/materialize")
+    created = (await client.get("/api/events")).json()
+    assert created[0]["tag_ids"] == preview["events"][0]["tag_ids"]

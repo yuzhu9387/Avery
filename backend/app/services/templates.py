@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Event, Task, Template, TemplateBlock
 from app.models.event import EventSource
+from app.models.task import TaskStatus
 from app.schemas.template import (
     TemplateBlockCreate,
     TemplateBlockUpdate,
@@ -159,6 +160,26 @@ async def preview_week(
     monday, next_monday = week_bounds(any_day)
     occupied = await _days_with_events(session, monday, next_monday)
 
+    # Mirror materialize_week's tag fallback: a block declaring no tags of its own
+    # inherits the resolved task's. Resolve read-only — never create — so preview stays
+    # a pure read while still predicting the tags materialization will really assign.
+    # Archived tasks are skipped for the same reason find_or_create_by_name skips them.
+    task_tags: dict[str, list[int]] = {}
+
+    async def tags_for(block: TemplateBlock) -> list[int]:
+        if block.tag_ids:
+            return list(block.tag_ids)
+        if block.task_name not in task_tags:
+            existing = (
+                await session.scalars(
+                    select(Task)
+                    .where(Task.name == block.task_name, Task.status != TaskStatus.ARCHIVED)
+                    .order_by(Task.id)
+                )
+            ).first()
+            task_tags[block.task_name] = list(existing.tag_ids) if existing else []
+        return list(task_tags[block.task_name])
+
     rows: list[dict] = []
     for offset in range(7):
         day = monday + timedelta(days=offset)
@@ -176,7 +197,7 @@ async def preview_week(
                     "task_name": block.task_name,
                     "start_at": start.isoformat(timespec="seconds"),
                     "end_at": end.isoformat(timespec="seconds"),
-                    "tag_ids": list(block.tag_ids),
+                    "tag_ids": await tags_for(block),
                     "template_block_id": block.id,
                 }
             )
