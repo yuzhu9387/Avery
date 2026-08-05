@@ -7,6 +7,7 @@ from app.models import Event, Task, Template, TemplateBlock
 from app.models.event import EventSource
 from app.schemas.template import TemplateBlockCreate, TemplateCreate
 from app.services import events as event_service
+from app.services import tags as tag_service
 from app.services import tasks as task_service
 from app.services.analytics import EventSlice, split_minutes_by_day
 
@@ -69,6 +70,7 @@ async def create_block(
 ) -> TemplateBlock | None:
     if await session.get(Template, template_id) is None:
         return None
+    await tag_service.assert_tags_exist(session, data.tag_ids)
     block = TemplateBlock(template_id=template_id, **data.model_dump())
     session.add(block)
     await session.commit()
@@ -82,6 +84,7 @@ async def update_block(
     block = await session.get(TemplateBlock, block_id)
     if block is None:
         return None
+    await tag_service.assert_tags_exist(session, data.tag_ids)
     for key, value in data.model_dump().items():
         setattr(block, key, value)
     await session.commit()

@@ -136,3 +136,28 @@ async def test_archiving_a_task_leaves_analytics_ratios_unchanged(client):
 
     after = (await client.post("/api/analytics/evaluate", json=period)).json()["metrics"]
     assert after["total_minutes"] == before["total_minutes"] == 360
+
+
+async def test_find_or_create_skips_an_archived_task(client, session):
+    """Matching on name alone let the Sunday cron re-attach events to a task the
+    user had archived, silently undoing the archive every week."""
+    from app.services import tasks as service
+
+    first = await service.find_or_create_by_name(session, "Work", [])
+    await client.delete(f"/api/tasks/{first.id}")
+
+    second = await service.find_or_create_by_name(session, "Work", [])
+    assert second.id != first.id
+    assert second.status == "todo"
+
+
+async def test_task_rejects_an_unknown_tag_id(client):
+    """Events and rules already validate tag ids. Tasks did not, and an event with
+    no tags inherits the task's — so the bad id arrived by the back door."""
+    bad = await client.post("/api/tasks", json={"name": "X", "tag_ids": [9999]})
+    assert bad.status_code == 422
+
+    ok = (await client.post("/api/tasks", json={"name": "Y", "tag_ids": []})).json()
+    assert (
+        await client.patch(f"/api/tasks/{ok['id']}", json={"tag_ids": [8888]})
+    ).status_code == 422

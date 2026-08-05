@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import Task
 from app.models.task import TaskStatus
 from app.schemas.task import TaskCreate, TaskUpdate
+from app.services import tags as tag_service
 
 
 async def list_tasks(
@@ -30,6 +31,7 @@ async def get_task(session: AsyncSession, task_id: int) -> Task | None:
 
 
 async def create_task(session: AsyncSession, data: TaskCreate) -> Task:
+    await tag_service.assert_tags_exist(session, data.tag_ids)
     payload = data.model_dump()
     task = Task(**payload)
     if task.status == TaskStatus.DONE:
@@ -45,6 +47,8 @@ async def update_task(session: AsyncSession, task_id: int, data: TaskUpdate) -> 
     if task is None:
         return None
     fields = data.model_dump(exclude_unset=True)
+    if "tag_ids" in fields:
+        await tag_service.assert_tags_exist(session, fields["tag_ids"])
     for key, value in fields.items():
         setattr(task, key, value)
     if "status" in fields:
@@ -71,8 +75,17 @@ async def archive_task(session: AsyncSession, task_id: int) -> Task | None:
 async def find_or_create_by_name(
     session: AsyncSession, name: str, tag_ids: list[int]
 ) -> Task:
-    """Used by event creation and template materialization to keep one Task per name."""
-    stmt = select(Task).where(Task.name == name).order_by(Task.id)
+    """Used by event creation and template materialization to keep one Task per name.
+
+    Archived tasks are skipped deliberately: matching them would let the Sunday roll
+    re-attach a fresh week of events to a task the user archived, undoing the archive
+    every week and showing events whose task appears in no picker.
+    """
+    stmt = (
+        select(Task)
+        .where(Task.name == name, Task.status != TaskStatus.ARCHIVED)
+        .order_by(Task.id)
+    )
     existing = (await session.scalars(stmt)).first()
     if existing is not None:
         return existing

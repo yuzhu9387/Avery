@@ -111,6 +111,9 @@ async def test_archiving_a_task_preserves_its_reminders(client, session):
     the cascade itself are still real; they are just exercised at the ORM level now,
     not through this endpoint. See test_events.py for the identical change to the
     task -> events cascade test, made for the same reason.
+
+    After archiving, the reminder rows are preserved in the database (not cascaded),
+    but they should not fire in list_due or list_reminders queries.
     """
     from datetime import datetime
 
@@ -124,8 +127,25 @@ async def test_archiving_a_task_preserves_its_reminders(client, session):
     assert archived.status_code == 200
     assert archived.json()["status"] == "archived"
 
+    assert len(await service.list_due(session, datetime(2026, 8, 10, 12, 0))) == 0
+    assert len((await client.get("/api/reminders")).json()) == 0
+
+
+async def test_archived_task_reminders_do_not_fire(client, session):
+    """Archiving is this app's delete. A reminder for an archived task must not be
+    swept — once Lark is wired it would push a nudge for a task the user removed."""
+    from datetime import datetime
+
+    task_id = await _task(client, "Dentist")
+    await client.post(
+        "/api/reminders", json={"task_id": task_id, "remind_at": "2026-08-01T09:00:00"}
+    )
     assert len(await service.list_due(session, datetime(2026, 8, 10, 12, 0))) == 1
-    assert len((await client.get("/api/reminders")).json()) == 1
+
+    assert (await client.delete(f"/api/tasks/{task_id}")).status_code == 200
+
+    assert await service.list_due(session, datetime(2026, 8, 10, 12, 0)) == []
+    assert (await client.get("/api/reminders")).json() == []
 
 
 async def test_delete_reminder(client):

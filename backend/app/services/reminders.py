@@ -1,9 +1,11 @@
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Reminder, Task
+from app.models.task import TaskStatus
 from app.schemas.reminder import ReminderCreate, ReminderUpdate
 
 
@@ -11,10 +13,17 @@ class TaskNotFound(Exception):
     """Raised when a reminder references a task that does not exist."""
 
 
+def _not_archived() -> Any:
+    """A reminder belongs to a task; an archived task's reminders are dormant."""
+    return Reminder.task_id.in_(
+        select(Task.id).where(Task.status != TaskStatus.ARCHIVED)
+    )
+
+
 async def list_reminders(
     session: AsyncSession, *, task_id: int | None = None, pending_only: bool = False
 ) -> list[Reminder]:
-    stmt = select(Reminder).order_by(Reminder.remind_at)
+    stmt = select(Reminder).where(_not_archived()).order_by(Reminder.remind_at)
     if task_id is not None:
         stmt = stmt.where(Reminder.task_id == task_id)
     if pending_only:
@@ -62,6 +71,7 @@ async def list_due(session: AsyncSession, now: datetime) -> list[Reminder]:
     stmt = (
         select(Reminder)
         .where(
+            _not_archived(),
             Reminder.remind_at <= now,
             Reminder.sent_at.is_(None),
             Reminder.dismissed_at.is_(None),

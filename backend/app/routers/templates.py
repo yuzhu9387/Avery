@@ -11,6 +11,7 @@ from app.schemas.template import (
     TemplateCreate,
     TemplateOut,
 )
+from app.services import tags as tag_service
 from app.services import templates as service
 
 router = APIRouter(prefix="/api/templates", tags=["templates"])
@@ -57,20 +58,30 @@ async def delete_template(template_id: int, session: AsyncSession = Depends(get_
 async def create_block(
     template_id: int, data: TemplateBlockCreate, session: AsyncSession = Depends(get_session)
 ):
-    block = await service.create_block(session, template_id, data)
-    if block is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "template not found")
-    return block
+    try:
+        block = await service.create_block(session, template_id, data)
+        if block is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "template not found")
+        return block
+    except tag_service.UnknownTagIds as exc:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY, f"unknown tag ids: {exc}"
+        )
 
 
 @block_router.patch("/{block_id}", response_model=TemplateBlockOut)
 async def update_block(
     block_id: int, data: TemplateBlockCreate, session: AsyncSession = Depends(get_session)
 ):
-    block = await service.update_block(session, block_id, data)
-    if block is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "block not found")
-    return block
+    try:
+        block = await service.update_block(session, block_id, data)
+        if block is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "block not found")
+        return block
+    except tag_service.UnknownTagIds as exc:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY, f"unknown tag ids: {exc}"
+        )
 
 
 @block_router.delete("/{block_id}", status_code=status.HTTP_204_NO_CONTENT)

@@ -196,3 +196,19 @@ async def test_delete_block(client):
     block_id = blocks[0]["id"]
     assert (await client.delete(f"/api/template-blocks/{block_id}")).status_code == 204
     assert (await client.get(f"/api/templates/{template_id}")).json()["blocks"] == []
+
+
+async def test_block_rejects_an_unknown_tag_id(client):
+    """A bad tag id on a block becomes a bad tag id on every event it materializes."""
+    template_id = (await client.post("/api/templates", json={"name": "T"})).json()["id"]
+    bad = await client.post(
+        f"/api/templates/{template_id}/blocks",
+        json={
+            "days": [1],
+            "start_time": "09:00:00",
+            "end_time": "10:00:00",
+            "task_name": "X",
+            "tag_ids": [7777],
+        },
+    )
+    assert bad.status_code == 422
