@@ -1870,8 +1870,60 @@ git commit -m "feat: add the week grid with positioned event blocks and the rule
 ### Task 8: Week view — drag to move and resize
 
 **Files:**
+- Modify first (backend prerequisite): `backend/app/services/calendar.py`, `backend/tests/test_calendar.py`
 - Create: `frontend/src/hooks/useEventDrag.ts`, `frontend/src/lib/drag.ts`, `frontend/src/lib/drag.test.ts`
 - Modify: `frontend/src/components/WeekGrid.tsx`, `frontend/src/hooks/useWeek.ts`
+
+**Prerequisite — a bled-over event must not suppress the week.** Found while verifying
+Task 7 and reproduced: `get_week` gates lazy materialization on `if not rows`, where
+`rows` is every event *overlapping* the week. So a single event from the previous Sunday
+running past midnight makes the new week look touched, and nothing materializes — you open
+Monday to one sliver instead of your week.
+
+Judge emptiness by whether any event *starts* inside the week. An event bleeding in from
+before is not the user having touched this week. In `get_week`:
+
+```python
+    rows = await event_service.list_events(session, start=start, end=end)
+    # An event bleeding in from the previous week is not the user having touched this
+    # one. Gating on overlap let a single Sunday-night block suppress the whole week's
+    # materialization, leaving a blank Monday.
+    starts_here = [e for e in rows if start <= e.start_at < end]
+    materialized = False
+
+    if not starts_here and allow_materialize and _is_materializable(monday):
+```
+
+The rest of the function is unchanged. `materialize_week`'s own per-day guard still
+protects the day the bleed lands on, so that day is skipped while the other six fill —
+which is the accepted day-level coarseness, not a new problem.
+
+Add to `backend/tests/test_calendar.py`:
+
+```python
+async def test_an_event_bleeding_in_does_not_suppress_the_week(client):
+    """Gating materialization on overlap let one Sunday-night block from the previous
+    week blank the entire following week."""
+    await _template(client, [WEEKDAY_BLOCK])
+    monday = _this_monday()
+    prev_sunday = monday - timedelta(days=1)
+
+    await client.post(
+        "/api/events",
+        json={
+            "task_name": "Late night",
+            "start_at": f"{prev_sunday.isoformat()}T22:00:00",
+            "end_at": f"{monday.isoformat()}T02:00:00",
+        },
+    )
+
+    body = (await client.get(f"/api/weeks/{monday.isoformat()}")).json()
+    assert body["materialized"] is True
+    # Monday itself is skipped because the bleed occupies it; the other four weekdays fill.
+    assert len(body["events"]) == 5  # 4 materialized + the bled-over one
+```
+
+Import `timedelta` in that test module if it is not already imported.
 
 **Interfaces:**
 - Consumes: `moveEvent`, `updateEvent`, `snapMinutes`, `pxToMinutes`
@@ -2017,7 +2069,7 @@ Pass `onPointerDownMove` / `onPointerDownResize` to `EventBlock` and offset the 
 - [ ] **Step 6: Run the tests and verify by hand**
 
 Run: `cd Avery/frontend && npx vitest run && npm run build`
-Expected: 22 tests pass (5 + 10 + 7); build clean.
+Expected: 22 frontend tests pass (5 + 10 + 7) and the backend suite reaches 146; build clean.
 
 By hand against the running backend: drag a work block two hours later and confirm it lands on the quarter hour and the rail's percentages change; drag one to another day; drag the bottom edge to lengthen it; try to drag the bottom edge above the top and confirm it clamps to 15 minutes rather than inverting.
 
@@ -2285,4 +2337,4 @@ Backlog items deliberately still open: `Event.template_block_id` as a real FK; t
 
 **Type consistency:** `Segment` is defined in Task 6 and consumed in Tasks 7–8. `AveryEvent` avoids colliding with the DOM `Event` type and is used consistently. `formatLocal` is the only path for outbound datetimes, defined in Task 5 and used in Tasks 8, 10, 13. `qk` keys defined in Task 5 are the same strings invalidated in Task 8. `TaskStats` and `PreviewResult` are produced by Phase A and typed in Task 5's `types.ts`. The backend's `minutes_by_primary_tag` rename in Task 2 matches the `MonthDay` and `Metrics` interfaces in Task 5.
 
-**Test counts:** backend 133 → 137 (Task 1) → 142 (Task 2) → 145 (Task 3). Frontend 5 (Task 5) → 15 (Task 6) → 22 (Task 8).
+**Test counts:** backend 133 → 137 (Task 1) → 142 (Task 2) → 145 (Task 3) → 146 (Task 8 prerequisite). Frontend 5 (Task 5) → 15 (Task 6) → 22 (Task 8).
