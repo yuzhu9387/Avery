@@ -483,15 +483,27 @@ GET                            /api/rules/active
 GET    POST                    /api/reports       /api/reports/{id}           DELETE
 GET    POST                    /api/reminders     /api/reminders/{id}   PATCH DELETE
 
-GET    /api/weeks/{iso_week}                 week payload, lazily materializes
-POST   /api/weeks/{iso_week}/materialize     explicit regeneration
+GET    /api/weeks/{any_date}                 week payload, lazily materializes
+POST   /api/weeks/{any_date}/materialize     explicit regeneration
 GET    /api/months/{yyyy-mm}                 month payload with per-day tag rollups
 POST   /api/analytics/evaluate               {start, end, rule_id?} → metrics
 POST   /api/reports/run                      {yyyy-mm} → Report with narrative
 POST   /api/agent/chat                       SSE stream
 ```
 
+Any ISO date identifies its week — `2026-08-05` and `2026-08-03` both resolve to the week
+beginning Monday 2026-08-03. There is no ISO-week-number form.
+
 FastAPI's generated OpenAPI schema at `/docs` doubles as the agent's tool reference.
+
+**Decisions taken during implementation** that amend the sections above: tags archive
+rather than hard-delete and archiving is the single removal path; tasks likewise archive,
+so an event's minutes are never silently removed from a past ratio; rules have no `PATCH`
+and refuse deletion once a report snapshots them; reports have no `PATCH` and are
+append-only; a rule's tag mapping is validated so a tag cannot be both excluded and
+grouped, sit in two groups, or share a group key; every referenced tag must exist; and
+SQLite foreign keys are switched on explicitly so the schema's cascades are real.
+Known gaps deliberately carried forward are listed in `docs/BACKLOG.md`.
 
 ---
 
