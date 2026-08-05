@@ -1,0 +1,17 @@
+export const qk = {
+  tags: ['tags'] as const,
+  tasks: (params?: Record<string, unknown>) => ['tasks', params ?? {}] as const,
+  task: (id: number) => ['task', id] as const,
+  taskStats: (id: number) => ['task', id, 'stats'] as const,
+  events: (params?: Record<string, unknown>) => ['events', params ?? {}] as const,
+  week: (day: string) => ['week', day] as const,
+  month: (key: string) => ['month', key] as const,
+  templates: ['templates'] as const,
+  activeTemplate: ['template', 'active'] as const,
+  preview: (day: string) => ['template', 'preview', day] as const,
+  rules: ['rules'] as const,
+  activeRule: ['rule', 'active'] as const,
+  reports: (month?: string) => ['reports', month ?? 'all'] as const,
+  reminders: (params?: Record<string, unknown>) => ['reminders', params ?? {}] as const,
+  evaluate: (start: string, end: string) => ['evaluate', start, end] as const,
+}
