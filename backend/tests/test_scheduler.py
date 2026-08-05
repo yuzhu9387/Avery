@@ -37,6 +37,29 @@ async def test_roll_next_week_without_template_reports_zero(client, session):
     assert result["skipped_reason"] == "no active template"
 
 
+async def test_double_start_returns_the_same_scheduler():
+    """Starting twice used to orphan the first scheduler — its thread kept running and
+    shutdown could only reach the newest one."""
+    from app.scheduler import jobs
+
+    first = jobs.start_scheduler()
+    try:
+        assert first is not None
+        assert jobs.start_scheduler() is first
+        assert len(first.get_jobs()) == 2
+    finally:
+        jobs.shutdown_scheduler()
+
+
+async def test_scheduler_disabled_by_config_is_a_no_op(monkeypatch):
+    from app.config import settings
+    from app.scheduler import jobs
+
+    monkeypatch.setattr(settings, "enable_scheduler", False)
+    assert jobs.start_scheduler() is None
+    jobs.shutdown_scheduler()  # must be safe when nothing was ever started
+
+
 async def test_sweep_marks_due_reminders_sent(client, session):
     task_id = (
         await client.post("/api/tasks", json={"name": "Renew passport", "tag_ids": []})

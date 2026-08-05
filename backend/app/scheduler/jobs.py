@@ -50,13 +50,25 @@ async def sweep_reminders(session: AsyncSession, now: datetime) -> list[int]:
 
 
 async def _run_week_roll() -> None:
-    async with async_session_factory() as session:
-        await roll_next_week(session, date.today())
+    # APScheduler catches job exceptions into its own logger and moves on. This job
+    # runs unattended on a Sunday night, so a silent failure means a blank Monday with
+    # nothing to explain it — record it under the app's logger with context too.
+    try:
+        async with async_session_factory() as session:
+            result = await roll_next_week(session, date.today())
+        logger.info("week roll: %s", result)
+    except Exception:
+        logger.exception("week roll failed")
 
 
 async def _run_reminder_sweep() -> None:
-    async with async_session_factory() as session:
-        await sweep_reminders(session, datetime.now())
+    try:
+        async with async_session_factory() as session:
+            handled = await sweep_reminders(session, datetime.now())
+        if handled:
+            logger.info("reminder sweep dispatched %d reminder(s)", len(handled))
+    except Exception:
+        logger.exception("reminder sweep failed")
 
 
 def start_scheduler() -> AsyncIOScheduler | None:
@@ -64,6 +76,11 @@ def start_scheduler() -> AsyncIOScheduler | None:
     if not settings.enable_scheduler:
         logger.info("scheduler disabled by config")
         return None
+    if _scheduler is not None:
+        # Starting twice would orphan the first scheduler: its thread keeps running and
+        # shutdown_scheduler() can only ever reach whichever one the global points at.
+        logger.warning("scheduler already running; ignoring duplicate start")
+        return _scheduler
     _scheduler = AsyncIOScheduler()
     _scheduler.add_job(
         _run_week_roll,
