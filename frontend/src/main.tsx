@@ -7,6 +7,7 @@ import App from './App'
 import MonthPage from './pages/MonthPage'
 import TaskDetailPage from './pages/TaskDetailPage'
 import TasksPage from './pages/TasksPage'
+import TemplatePage from './pages/TemplatePage'
 import WeekPage from './pages/WeekPage'
 import './index.css'
 
@@ -27,7 +28,7 @@ const router = createBrowserRouter([
       { path: 'month', element: <MonthPage /> },
       { path: 'tasks', element: <TasksPage /> },
       { path: 'tasks/:taskId', element: <TaskDetailPage /> },
-      { path: 'template', element: <Placeholder name="Template" /> },
+      { path: 'template', element: <TemplatePage /> },
       { path: 'rules', element: <Placeholder name="Rules" /> },
       { path: 'review', element: <Placeholder name="Review" /> },
     ],
