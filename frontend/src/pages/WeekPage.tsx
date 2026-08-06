@@ -31,7 +31,9 @@ export default function WeekPage() {
   const day = formatDate(monday)
 
   const week = useWeek(monday)
-  const ratios = useWeekRatios(monday)
+  // Gated on `week` resolving first — see the comment on `useWeekRatios` for why
+  // firing this in parallel can cache a false "0 minutes" snapshot.
+  const ratios = useWeekRatios(monday, week.isSuccess)
   const tagMap = useTagMap()
   const { draft, onPointerDownMove, onPointerDownResize } = useEventDrag()
 

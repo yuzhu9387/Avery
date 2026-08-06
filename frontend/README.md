@@ -1,32 +1,55 @@
-# React + TypeScript + Vite
+# Avery frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+React + TypeScript + Vite UI for Avery, a personal schedule agent.
 
-Currently, two official plugins are available:
+## Setup
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```bash
+npm install
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+## Run
+
+```bash
+npm run dev
+```
+
+Starts the dev server on **http://localhost:5173**. Vite proxies `/api` requests to
+**`127.0.0.1:8001`** (see `vite.config.ts`), so the app itself never needs an `API_URL`
+of its own — it just talks to `/api` and the proxy forwards to the backend.
+
+The backend must already be running on port 8001 (not 8000 — see `../backend/README.md`
+for why) and must be seeded before the app has anything meaningful to show:
+
+```bash
+cd ../backend
+arch -arm64 .venv/bin/python -m uvicorn app.main:app --port 8001
+curl -s -X POST 127.0.0.1:8001/api/seed
+```
+
+With the backend down, pages should degrade to a readable message rather than a blank
+screen or a raw error.
+
+## Test
+
+```bash
+npx vitest run
+```
+
+Covers the datetime, geometry, drag, and rules suites — the pure-logic layer the views
+are built on (`src/lib/datetime.test.ts`, `src/lib/geometry.test.ts`, `src/lib/drag.test.ts`,
+`src/hooks/useRules.test.ts`). These run against plain Node, no backend required.
+
+## Build
+
+```bash
+npm run build
+```
+
+Runs `tsc -b` then `vite build`.
+
+## Theme
+
+The entire color palette lives in `src/theme.css` as CSS custom properties. No hex
+literals are permitted in components — reach for a token (e.g. `var(--color-accent)`)
+instead of a raw color value, so the palette stays swappable from one file.

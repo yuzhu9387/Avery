@@ -13,15 +13,22 @@ cp .env.example .env
 ## Run
 
 ```bash
-.venv/bin/uvicorn app.main:app --reload --port 8000
+.venv/bin/uvicorn app.main:app --reload --port 8001
 ```
 
-Interactive API docs: http://localhost:8000/docs
+Interactive API docs: http://localhost:8001/docs
+
+**Use port 8001, not 8000.** On this machine a Docker container listens on `*:8000`
+over the IPv6 wildcard and answers on both `localhost` and `127.0.0.1`. A backend
+started on 8000 is shadowed by it — requests appear to succeed but are silently
+answered by the unrelated container, not by Avery. The frontend's dev proxy already
+expects the backend on 8001; see `../frontend/README.md` for the UI, which proxies
+`/api` there.
 
 ## First run
 
 ```bash
-curl -X POST localhost:8000/api/seed
+curl -X POST 127.0.0.1:8001/api/seed
 ```
 
 Creates the eight tags, the 6:3:1 rule, and the default weekly template.
