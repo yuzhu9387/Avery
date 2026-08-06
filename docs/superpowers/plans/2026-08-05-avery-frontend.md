@@ -2160,7 +2160,24 @@ git commit -m "feat: add the task list and task detail with the hours rollup"
 
 - [ ] **Step 1: Build the three columns**
 
-Render blocks grouped as **Mon–Fri** (`days` equals `[1,2,3,4,5]`), **Saturday** (`[6]`), **Sunday** (`[7]`), matching the layout the template came from. Any block whose `days` matches none of those three shapes goes in a fourth "Custom" column with its day set spelled out — the data model allows arbitrary day sets, so the UI must not silently hide one.
+Group blocks by **exact** `days` match into four canonical columns, then a fifth for the rest:
+
+| `days` | Column |
+|---|---|
+| `[1,2,3,4,5,6,7]` | **Every day** |
+| `[1,2,3,4,5]` | **Mon–Fri** |
+| `[6]` | **Saturday** |
+| `[7]` | **Sunday** |
+| anything else | **Custom**, with the day set spelled out |
+
+**Match exactly — never by superset.** The seeded rest block is `[1..7]`, and folding it into
+Mon–Fri because it contains those days would tell the user sleep is scheduled on weekdays
+only, when in fact it runs every night. It is the one block that genuinely applies daily,
+which is why "Every day" is its own column rather than a Custom oddity.
+
+The data model allows arbitrary day sets, so the Custom column must exist and must spell
+out its members; silently hiding a block would lose part of the schedule with no
+indication.
 
 Each block row shows time range, task name, and a tag chip, sorted by `start_time`. Clicking opens `BlockForm` for a partial PATCH; a delete button removes it.
 
@@ -2170,7 +2187,7 @@ A "Preview next week" button calls `previewWeek(formatDate(addDays(mondayOf(new 
 
 - [ ] **Step 3: Verify and commit**
 
-Confirm the seeded template shows 8 weekday blocks, 5 Saturday, 6 Sunday; that renaming a block persists; and that previewing does not create events (check the week view afterwards).
+Confirm the seeded template's 19 blocks distribute as **Every day 1, Mon–Fri 7, Saturday 5, Sunday 6, Custom 0** — verified against `SEED_BLOCKS`, whose day-sets are exactly `[6]`×5, `[7]`×6, `[1,2,3,4,5]`×7, and `[1..7]`×1. Also confirm renaming a block persists across a reload, and that previewing creates no events (compare `GET /api/events` counts before and after).
 
 Run: `cd Avery/frontend && npm run build`
 
