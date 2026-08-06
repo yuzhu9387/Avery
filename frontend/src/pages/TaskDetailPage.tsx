@@ -28,7 +28,15 @@ function remindAtLabel(s: string): string {
 
 export default function TaskDetailPage() {
   const params = useParams<{ taskId: string }>()
-  const taskId = Number(params.taskId)
+  // Two detail routes share one component instance under React Router — without a
+  // key tied to the route param, `notes` typed for task A (and every other bit of
+  // local state below) would survive a navigation straight into task B, and the
+  // next blur would PATCH A's edits onto B. Keying by taskId forces a full remount
+  // on every navigation between tasks instead.
+  return <TaskDetail key={params.taskId} taskId={Number(params.taskId)} />
+}
+
+function TaskDetail({ taskId }: { taskId: number }) {
   const navigate = useNavigate()
 
   const taskQuery = useTask(taskId)
@@ -94,19 +102,39 @@ export default function TaskDetailPage() {
         {task.tag_ids.map((id) => (
           <TagChip key={id} tag={tagMap.get(id)} />
         ))}
-        <select
-          value={task.status === 'archived' ? 'done' : task.status}
-          onChange={(e) =>
-            updateTask.mutate({ id: task.id, body: { status: e.target.value as TaskStatus } })
-          }
-          className="ml-2 rounded-[8px] border border-line bg-surface px-2 py-1 text-xs text-ink"
-        >
-          {STATUSES.map((s) => (
-            <option key={s} value={s}>
-              {s}
-            </option>
-          ))}
-        </select>
+        {task.status === 'archived' ? (
+          // Folding "archived" into the "done" option made re-archiving unreachable:
+          // the select already read "done", so picking "done" again fired no change
+          // event. Showing it as its own state with an explicit Restore action is the
+          // only way back.
+          <div className="ml-2 flex items-center gap-2">
+            <span className="rounded-[8px] border border-line bg-surface px-2 py-1 text-xs text-ink-faint">
+              archived
+            </span>
+            <button
+              type="button"
+              onClick={() => updateTask.mutate({ id: task.id, body: { status: 'todo' } })}
+              disabled={updateTask.isPending}
+              className="text-xs font-medium text-ink-muted underline hover:text-ink disabled:opacity-50"
+            >
+              Restore
+            </button>
+          </div>
+        ) : (
+          <select
+            value={task.status}
+            onChange={(e) =>
+              updateTask.mutate({ id: task.id, body: { status: e.target.value as TaskStatus } })
+            }
+            className="ml-2 rounded-[8px] border border-line bg-surface px-2 py-1 text-xs text-ink"
+          >
+            {STATUSES.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+        )}
       </div>
 
       <Field label="Notes">
@@ -225,7 +253,12 @@ function RemindersSection({ taskId }: { taskId: number }) {
     queryFn: () => listReminders({ task_id: taskId }),
   })
 
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: qk.reminders({ task_id: taskId }) })
+  // Invalidating the exact key (['reminders', {task_id}]) does not prefix-match
+  // TasksPage's ['reminders', {pending_only: true}] — React Query keys match by
+  // exact-prefix array equality, not by overlapping filter params. Invalidating the
+  // bare ['reminders'] prefix catches every reminders query, including the bells
+  // on the Tasks page.
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['reminders'] })
 
   const setDismissed = useMutation({
     mutationFn: ({ id, dismissedAt }: { id: number; dismissedAt: string | null }) =>
@@ -248,10 +281,12 @@ function RemindersSection({ taskId }: { taskId: number }) {
 
   const handleAdd = () => {
     if (!remindAt) return
-    // datetime-local values ("YYYY-MM-DDTHH:mm") have no timezone suffix, so the
-    // Date constructor reads them as local wall-clock — the same assumption the
-    // rest of the app makes. formatLocal turns that back into the outbound string.
-    const d = new Date(remindAt)
+    // parseLocal/formatLocal are the only sanctioned datetime paths in this codebase
+    // (toISOString() shifts to UTC and was banned for exactly that reason) — `new
+    // Date(remindAt)` was the one place that still bypassed it. It also directly
+    // handles the seconds-less "YYYY-MM-DDTHH:mm" a datetime-local input produces,
+    // reading it as local wall-clock, the same assumption the rest of the app makes.
+    const d = parseLocal(remindAt)
     create.mutate(
       { task_id: taskId, remind_at: formatLocal(d), channel },
       { onSuccess: () => setRemindAt('') },

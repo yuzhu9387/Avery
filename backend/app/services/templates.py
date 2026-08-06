@@ -15,7 +15,6 @@ from app.schemas.template import (
 from app.services import events as event_service
 from app.services import tags as tag_service
 from app.services import tasks as task_service
-from app.services.analytics import EventSlice, split_minutes_by_day
 
 
 class NoActiveTemplate(Exception):
@@ -122,25 +121,27 @@ async def delete_block(session: AsyncSession, block_id: int) -> bool:
 
 
 async def _days_with_events(session: AsyncSession, monday: date, next_monday: date) -> set[date]:
-    """Every day an event *touches*, not merely the day it starts on.
+    """Days on which the user already has something scheduled.
 
-    A Sunday-night block running into Monday occupies Monday too. Keying off start_at
-    alone let materialization pile a full template day on top of it.
+    Occupancy is judged by where an event *starts*, not by every day it touches.
+    Judging by touch looked safer and was catastrophic: the seeded rest block runs
+    23:00->07:00 nightly, so Sunday's rest always bled into Monday, marked it occupied,
+    and silently dropped Monday's eight blocks from every week after the first.
+
+    The cost of this choice is that a long manual event spilling past midnight can now
+    have template blocks materialized over it, producing an overlap. Overlaps are a
+    condition this system already detects (`Evaluation.overlaps`) and the Review page
+    warns about, so they are visible and fixable. Silent loss is neither. This also makes
+    the rule agree with `get_week`'s gate instead of contradicting it.
     """
     rows = await event_service.list_events(
         session,
         start=datetime.combine(monday, datetime.min.time()),
         end=datetime.combine(next_monday, datetime.min.time()),
     )
-    occupied: set[date] = set()
-    for event in rows:
-        slice_ = EventSlice(
-            id=event.id, start_at=event.start_at, end_at=event.end_at, tag_ids=()
-        )
-        for day in split_minutes_by_day(slice_):
-            if monday <= day < next_monday:
-                occupied.add(day)
-    return occupied
+    return {
+        e.start_at.date() for e in rows if monday <= e.start_at.date() < next_monday
+    }
 
 
 async def preview_week(

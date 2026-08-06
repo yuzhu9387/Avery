@@ -1,8 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { QueryClient } from '@tanstack/react-query'
 
+import { ApiError } from '../api/client'
 import {
   createBlock,
+  createTemplate,
   deleteBlock,
   getActiveTemplate,
   previewWeek,
@@ -88,7 +90,13 @@ export function diffBlock(
 }
 
 export function useActiveTemplate() {
-  return useQuery({ queryKey: qk.activeTemplate, queryFn: getActiveTemplate })
+  return useQuery({
+    queryKey: qk.activeTemplate,
+    queryFn: getActiveTemplate,
+    // Same reasoning as useActiveRule: a 404 means "no active template configured",
+    // a normal and common state, not a flaky request worth retrying three times.
+    retry: (count, error) => !(error instanceof ApiError && error.status === 404) && count < 3,
+  })
 }
 
 /** A block mutation can change what any future, not-yet-materialized week looks
@@ -98,6 +106,18 @@ function invalidateTemplateEffects(queryClient: QueryClient) {
   queryClient.invalidateQueries({ queryKey: ['template'] })
   queryClient.invalidateQueries({ queryKey: ['week'] })
   queryClient.invalidateQueries({ queryKey: ['evaluate'] })
+}
+
+/** Recovers from the empty state: a database that never ran /api/seed, or one whose
+ *  active template was deleted, has nowhere to click "New block" — there is no
+ *  template to attach it to. This creates a bare active template so the editor has
+ *  something to build on. */
+export function useCreateTemplate() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: Partial<Template>) => createTemplate(body),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['template'] }),
+  })
 }
 
 export function useUpdateTemplate() {

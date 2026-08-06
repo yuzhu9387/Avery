@@ -34,6 +34,12 @@ export function useEventDrag() {
     queryClient.invalidateQueries({ queryKey: ['week'] })
     queryClient.invalidateQueries({ queryKey: ['evaluate'] })
     queryClient.invalidateQueries({ queryKey: ['month'] })
+    // A dragged event's minutes also feed the task rollup (TaskDetailPage's total,
+    // TasksPage's list, MonthPage's day panel) and the raw event list — all must go
+    // stale too.
+    queryClient.invalidateQueries({ queryKey: ['task'] })
+    queryClient.invalidateQueries({ queryKey: ['tasks'] })
+    queryClient.invalidateQueries({ queryKey: ['events'] })
   }, [queryClient])
 
   const move = useMutation({

@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 
 import { ApiError } from '../api/client'
-import type { TemplateBlock } from '../api/types'
+import type { PreviewResult, TemplateBlock } from '../api/types'
 import { BlockForm } from '../components/BlockForm'
 import { Modal } from '../components/Modal'
 import { TagChip } from '../components/TagChip'
@@ -11,6 +11,7 @@ import {
   formatDaySet,
   useActiveTemplate,
   useCreateBlock,
+  useCreateTemplate,
   useDeleteBlock,
   usePreviewWeek,
   useUpdateBlock,
@@ -50,6 +51,7 @@ export default function TemplatePage() {
   const tagMap = useTagMap()
 
   const updateTemplate = useUpdateTemplate()
+  const createTemplate = useCreateTemplate()
   const createBlock = useCreateBlock()
   const updateBlock = useUpdateBlock()
   const deleteBlock = useDeleteBlock()
@@ -57,6 +59,18 @@ export default function TemplatePage() {
   const previewDay = formatDate(addDays(mondayOf(new Date()), 7))
   const preview = usePreviewWeek(previewDay)
   const [previewRequested, setPreviewRequested] = useState(false)
+  // `usePreviewWeek` is `enabled: false`, so invalidating ['template'] after a block
+  // mutation marks it stale WITHOUT refetching (React Query v5 never refetches an
+  // inactive query) — the panel would otherwise keep rendering `preview.data` from
+  // before the edit. Holding the rendered result here, set only from an explicit
+  // `refetch()`, and clearing it wherever a block mutation succeeds, means the panel
+  // can never disagree with what the template actually contains.
+  const [previewResult, setPreviewResult] = useState<PreviewResult | null>(null)
+
+  const clearPreview = () => {
+    setPreviewRequested(false)
+    setPreviewResult(null)
+  }
 
   const [modal, setModal] = useState<ModalState | null>(null)
   const [name, setName] = useState<string | null>(null)
@@ -81,7 +95,36 @@ export default function TemplatePage() {
     return map
   }, [template])
 
+  // A 404 on /templates/active means "none configured yet" — a fresh database, or the
+  // active template was deleted — not "something broke". That state is recoverable
+  // in-app, so it gets an empty state and a way out instead of a dead-end error.
+  const noActiveTemplate = templateQuery.error instanceof ApiError && templateQuery.error.status === 404
+
   if (templateQuery.isLoading) return <p className="p-6 text-sm text-ink-faint">Loading template…</p>
+
+  if (noActiveTemplate) {
+    return (
+      <div className="mx-auto max-w-6xl p-6">
+        <div className="rounded-[12px] border border-line bg-surface p-5">
+          <p className="mb-3 text-sm text-ink-muted">
+            No active template yet. Create one to start generating weeks automatically.
+          </p>
+          {createTemplate.isError && (
+            <p className="mb-3 text-xs text-[var(--over)]">Couldn't create the template.</p>
+          )}
+          <button
+            type="button"
+            disabled={createTemplate.isPending}
+            onClick={() => createTemplate.mutate({ name: 'Default week', is_active: true })}
+            className="rounded-[8px] bg-[var(--pale)] px-3 py-1.5 text-sm font-medium text-ink transition-opacity hover:opacity-80 disabled:opacity-50"
+          >
+            {createTemplate.isPending ? 'Creating…' : 'Create a template'}
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   if (templateQuery.isError || !template) {
     return <p className="p-6 text-sm text-ink-faint">Couldn't load the template.</p>
   }
@@ -101,10 +144,20 @@ export default function TemplatePage() {
   const handleSubmit = (body: Partial<TemplateBlock>) => {
     if (!modal) return
     if (modal.mode === 'create') {
-      createBlock.mutate({ templateId: template.id, body }, { onSuccess: closeModal })
+      createBlock.mutate(
+        { templateId: template.id, body },
+        { onSuccess: () => { closeModal(); clearPreview() } },
+      )
     } else {
-      updateBlock.mutate({ id: modal.block.id, body }, { onSuccess: closeModal })
+      updateBlock.mutate(
+        { id: modal.block.id, body },
+        { onSuccess: () => { closeModal(); clearPreview() } },
+      )
     }
+  }
+
+  const handleDelete = (block: TemplateBlock) => {
+    deleteBlock.mutate(block.id, { onSuccess: clearPreview })
   }
 
   const formError = (mutation: typeof createBlock | typeof updateBlock) =>
@@ -112,7 +165,9 @@ export default function TemplatePage() {
 
   const runPreview = () => {
     setPreviewRequested(true)
-    preview.refetch()
+    preview.refetch().then((result) => {
+      if (result.data) setPreviewResult(result.data)
+    })
   }
 
   return (
@@ -153,7 +208,7 @@ export default function TemplatePage() {
             tagMap={tagMap}
             onAdd={col.presetDays ? () => setModal({ mode: 'create', initialDays: col.presetDays! }) : undefined}
             onEdit={(block) => setModal({ mode: 'edit', block })}
-            onDelete={(block) => deleteBlock.mutate(block.id)}
+            onDelete={handleDelete}
           />
         ))}
       </div>
@@ -180,9 +235,9 @@ export default function TemplatePage() {
           <p className="text-sm text-ink-faint">Couldn't load the preview.</p>
         )}
 
-        {previewRequested && preview.data && (
+        {previewRequested && previewResult && (
           <>
-            {preview.data.events.length === 0 ? (
+            {previewResult.events.length === 0 ? (
               <p className="text-sm text-ink-faint">
                 Next week is already filled in — every day already has events, so materializing
                 would skip all of them.
@@ -190,11 +245,11 @@ export default function TemplatePage() {
             ) : (
               <>
                 <p className="mb-2 text-xs text-ink-faint">
-                  {preview.data.events.length} event{preview.data.events.length === 1 ? '' : 's'}{' '}
+                  {previewResult.events.length} event{previewResult.events.length === 1 ? '' : 's'}{' '}
                   would appear.
                 </p>
                 <ul className="rounded-[12px] border border-line bg-surface">
-                  {preview.data.events.map((row, i) => {
+                  {previewResult.events.map((row, i) => {
                     const start = parseLocal(row.start_at)
                     return (
                       <li

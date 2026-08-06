@@ -1,12 +1,21 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { QueryClient } from '@tanstack/react-query'
 
+import { ApiError } from '../api/client'
 import { createRuleVersion, deleteRule, getActiveRule, listRules } from '../api/rules'
 import { qk } from '../api/keys'
 import type { Rule } from '../api/types'
 
 export function useActiveRule() {
-  return useQuery({ queryKey: qk.activeRule, queryFn: getActiveRule })
+  return useQuery({
+    queryKey: qk.activeRule,
+    queryFn: getActiveRule,
+    // A 404 here means "no active rule configured" — a normal, common, non-transient
+    // state, not a flaky request. Retrying it three times over several seconds just
+    // delays the empty state for no benefit; only retry errors that might genuinely
+    // be transient.
+    retry: (count, error) => !(error instanceof ApiError && error.status === 404) && count < 3,
+  })
 }
 
 export function useRules() {

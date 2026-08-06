@@ -49,12 +49,16 @@ export function BlockForm({
     setTagIds((prev) => (prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id]))
   }
 
-  // Not an error: it's how the 23:00–07:00 rest block is stored.
-  const crossesMidnight = endTime <= startTime
+  // Not an error: it's how the 23:00–07:00 rest block is stored. Equality is NOT
+  // "crosses midnight" — that used to be treated as an overnight wrap and let a
+  // fumbled block submit as a full 24-hour block, silently dominating every ratio
+  // it touched. A zero-length block is never intended, so equality is rejected below.
+  const crossesMidnight = endTime < startTime
+  const isZeroLength = endTime === startTime
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault()
-    if (!taskName.trim() || days.length === 0) return
+    if (!taskName.trim() || days.length === 0 || isZeroLength) return
 
     const next = {
       days: [...days].sort((a, b) => a - b),
@@ -125,6 +129,11 @@ export function BlockForm({
           />
         </Field>
       </div>
+      {isZeroLength && (
+        <p className="-mt-2 mb-3 text-xs text-[var(--over)]">
+          Start and end time are the same — pick a different end time.
+        </p>
+      )}
       {crossesMidnight && (
         <p className="-mt-2 mb-3 text-xs text-ink-faint">
           Crosses midnight — ends the morning after it starts.
@@ -175,7 +184,7 @@ export function BlockForm({
         </button>
         <button
           type="submit"
-          disabled={submitting || !taskName.trim() || days.length === 0}
+          disabled={submitting || !taskName.trim() || days.length === 0 || isZeroLength}
           className="rounded-[8px] bg-[var(--pale)] px-3 py-1.5 text-sm font-medium text-ink transition-opacity hover:opacity-80 disabled:opacity-50"
         >
           {submitting ? 'Saving…' : block ? 'Save' : 'Create'}

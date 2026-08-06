@@ -154,5 +154,7 @@ async def test_an_event_bleeding_in_does_not_suppress_the_week(client):
 
     body = (await client.get(f"/api/weeks/{monday.isoformat()}")).json()
     assert body["materialized"] is True
-    # Monday itself is skipped because the bleed occupies it; the other four weekdays fill.
-    assert len(body["events"]) == 5  # 4 materialized + the bled-over one
+    # Occupancy is judged by where an event starts, not by every day it touches, so
+    # the bleeding-in event (which starts Sunday) does not occupy Monday: all five
+    # weekdays materialize on top of it, alongside the bled-over event itself.
+    assert len(body["events"]) == 6  # 5 materialized + the bled-over one

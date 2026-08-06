@@ -155,10 +155,17 @@ async def test_week_is_materialized_in_a_single_commit(client, session):
     assert max(jumps) == 12, f"events arrived in multiple commits: {committed}"
 
 
-async def test_spillover_event_occupies_the_day_it_spills_into(client):
-    """A Sunday-night event running into Monday must occupy Monday too. Keying
-    occupancy off start_at alone would leave Monday looking empty and pile a full
-    template day on top of the spilled-over minutes."""
+async def test_spillover_event_does_not_block_materialization_but_overlap_is_reported(
+    client,
+):
+    """Occupancy is judged by where an event *starts*, not by every day it touches.
+
+    A Sunday-night event spilling into Monday used to mark Monday occupied and skip
+    it entirely — silently dropping the day's blocks forever (every week after the
+    first, since the seeded rest block runs nightly). That is worse than the
+    alternative: materialize Monday anyway, even though it now overlaps the tail of
+    the spilling event, and let the overlap be reported. `Evaluation.overlaps` exists
+    exactly to surface this, and it does — silent loss does not."""
     all_days_block = {
         "days": [1, 2, 3, 4, 5, 6, 7],
         "start_time": "09:30:00",
@@ -168,8 +175,8 @@ async def test_spillover_event_occupies_the_day_it_spills_into(client):
     }
     await _template(client, [all_days_block])
 
-    # Sunday 2026-08-02 22:00 -> Monday 2026-08-03 10:00: spills into the week
-    # that starts on Monday 2026-08-03.
+    # Sunday 2026-08-02 22:00 -> Monday 2026-08-03 10:00: starts before the week that
+    # begins Monday 2026-08-03, but spills into it and overlaps the Monday block below.
     await client.post(
         "/api/events",
         json={
@@ -182,12 +189,30 @@ async def test_spillover_event_occupies_the_day_it_spills_into(client):
     result = await client.post("/api/weeks/2026-08-03/materialize")
     assert result.status_code == 200
     body = result.json()
-    assert body["created"] == 6  # every day but the occupied Monday
-    assert body["skipped_days"] == ["2026-08-03"]
+    assert body["created"] == 7  # every day, including Monday
+    assert body["skipped_days"] == []
 
-    # The spilling event's own (out-of-week) start date must never leak in.
-    for day in body["skipped_days"]:
-        assert "2026-08-03" <= day < "2026-08-10"
+    # An active rule is required for /evaluate; overlap detection doesn't care what's
+    # in it, so an empty-tag group is enough to unlock the endpoint.
+    await client.post(
+        "/api/rules",
+        json={
+            "name": "Baseline",
+            "groups": [{"key": "A", "label": "Everything", "ratio": 1, "tag_ids": []}],
+        },
+    )
+    evaluation = await client.post(
+        "/api/analytics/evaluate",
+        json={
+            "period_start": "2026-08-03T00:00:00",
+            "period_end": "2026-08-10T00:00:00",
+        },
+    )
+    assert evaluation.status_code == 200
+    assert evaluation.json()["metrics"]["overlaps"], (
+        "the Monday block materialized on top of the spilling Rest event, so the "
+        "week's evaluation must report the overlap instead of hiding it"
+    )
 
 
 async def test_delete_block(client):
@@ -251,6 +276,29 @@ async def test_preview_does_not_write_anything(client):
     assert body["events"][0]["start_at"] == "2026-08-03T09:30:00"
 
     assert (await client.get("/api/events")).json() == []
+
+
+async def test_every_week_materializes_a_full_monday(client):
+    """The nightly rest block bleeds Sunday into Monday. Judging occupancy by touch
+    dropped Monday's blocks from every week after the first — 8 events a week, silently."""
+    await client.post("/api/seed")
+
+    first = (await client.post("/api/weeks/2026-08-03/materialize")).json()
+    second = (await client.post("/api/weeks/2026-08-10/materialize")).json()
+    third = (await client.post("/api/weeks/2026-08-17/materialize")).json()
+
+    assert first["created"] == second["created"] == third["created"] == 53
+    assert second["skipped_days"] == [] and third["skipped_days"] == []
+
+    for monday, next_day in (("2026-08-10", "2026-08-11"), ("2026-08-17", "2026-08-18")):
+        events = (
+            await client.get(
+                "/api/events",
+                params={"start": f"{monday}T00:00:00", "end": f"{next_day}T00:00:00"},
+            )
+        ).json()
+        starting = [e for e in events if e["start_at"].startswith(monday)]
+        assert len(starting) == 8, f"{monday} lost blocks"
 
 
 async def test_preview_predicts_the_tags_that_will_be_created(client):
