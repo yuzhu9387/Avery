@@ -5,6 +5,7 @@ import { RouterProvider, createBrowserRouter } from 'react-router-dom'
 
 import App from './App'
 import MonthPage from './pages/MonthPage'
+import RulesPage from './pages/RulesPage'
 import TaskDetailPage from './pages/TaskDetailPage'
 import TasksPage from './pages/TasksPage'
 import TemplatePage from './pages/TemplatePage'
@@ -29,7 +30,7 @@ const router = createBrowserRouter([
       { path: 'tasks', element: <TasksPage /> },
       { path: 'tasks/:taskId', element: <TaskDetailPage /> },
       { path: 'template', element: <TemplatePage /> },
-      { path: 'rules', element: <Placeholder name="Rules" /> },
+      { path: 'rules', element: <RulesPage /> },
       { path: 'review', element: <Placeholder name="Review" /> },
     ],
   },
