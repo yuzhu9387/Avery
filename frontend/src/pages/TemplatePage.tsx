@@ -22,6 +22,7 @@ import { addDays, formatDate, formatMinutes, formatTimeRange, mondayOf, parseLoc
 const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
 const COLUMN_DEFS: { key: ColumnKey; title: string; presetDays?: number[] }[] = [
+  { key: 'everyday', title: 'Every day', presetDays: [1, 2, 3, 4, 5, 6, 7] },
   { key: 'weekday', title: 'Mon–Fri', presetDays: [1, 2, 3, 4, 5] },
   { key: 'saturday', title: 'Saturday', presetDays: [6] },
   { key: 'sunday', title: 'Sunday', presetDays: [7] },
@@ -65,6 +66,7 @@ export default function TemplatePage() {
 
   const grouped = useMemo(() => {
     const map: Record<ColumnKey, TemplateBlock[]> = {
+      everyday: [],
       weekday: [],
       saturday: [],
       sunday: [],
@@ -114,7 +116,7 @@ export default function TemplatePage() {
   }
 
   return (
-    <div className="mx-auto max-w-5xl p-6">
+    <div className="mx-auto max-w-6xl p-6">
       <div className="mb-6 flex items-center justify-between gap-3">
         <input
           value={displayName}
@@ -142,7 +144,7 @@ export default function TemplatePage() {
         </button>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
         {COLUMN_DEFS.map((col) => (
           <Column
             key={col.key}
