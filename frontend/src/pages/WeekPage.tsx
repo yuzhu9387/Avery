@@ -59,15 +59,19 @@ export default function WeekPage() {
   const queryClient = useQueryClient()
   const materialize = useMutation({
     mutationFn: () => materializeWeek(day),
-    // Generating from the template creates events (which the rule rail's ratios and
-    // the month grid depend on) and can create new tasks (which the grid's taskMap
-    // depends on to render a name instead of "Task #N"). Invalidating only ['week']
-    // left all three stale — the third instance of this exact race.
+    // Generating from the template creates events (which the rule rail's ratios, the
+    // month grid and the month day panel's raw event list all depend on) and can create
+    // new tasks (which the grid's taskMap needs to render a name instead of "Task #N").
+    // Invalidating only ['week'] left every one of them stale — and because staleTime is
+    // 30s with no refetch on focus, a wrong answer stays on screen rather than blinking.
+    // ['events'] is the one Month's day panel reads; omitting it was the fourth instance
+    // of this same race, so invalidate everything a new event can be seen through.
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: qk.week(day) })
       queryClient.invalidateQueries({ queryKey: ['evaluate'] })
       queryClient.invalidateQueries({ queryKey: ['month'] })
       queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      queryClient.invalidateQueries({ queryKey: ['events'] })
     },
   })
 
