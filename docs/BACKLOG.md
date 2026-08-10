@@ -1,95 +1,130 @@
 # Avery — carry-forward backlog
 
-Items found by the final whole-branch review of the backend that were deliberately
-**not** fixed in that pass, to avoid expanding its scope. Each is real and reproduced.
-Ordered by severity.
+Open items after Plan 1 (backend) and Plan 2 (frontend + the backend gaps it needed).
+Each was found by review, reproduced, and deliberately not fixed in order to keep a
+wave's scope closed. Ordered by severity.
 
-Backend state at the time of writing: 133 tests passing, commit `09d82b9`.
+State at the time of writing: backend **147** tests, frontend **31**, commit `2ceaa0a`.
+
+**Closed by Plan 2** — the archived-task reminder leak, `find_or_create_by_name`
+resurrecting archived tasks, tag-existence validation on tasks and template blocks,
+`PATCH /api/templates`, partial block PATCH, the non-writing week preview, `ReportOut.rule`,
+the `minutes_by_tag` rename, `/tasks/{id}/stats`, and `floating_only`.
 
 ---
 
-## Important — archiving a task leaves its reminders live
+## Should fix soon
 
-`app/services/reminders.py` — neither `list_reminders` nor `list_due` joins `Task.status`.
+### The month payload cannot warn about overlapping time
 
-Reproduce: create task "Dentist" with a reminder at `2026-08-10T09:00`, then
-`DELETE /api/tasks/{id}` (which archives). `GET /api/reminders` still returns it and
-`list_due` still yields it, so the 15-minute sweep marks it sent — and once Plan 3 wires
-Lark, it will push a reminder for a task the user deleted.
+`app/services/calendar.py` — the per-day payload carries `date`, `event_count`,
+`total_minutes`, `minutes_by_primary_tag` and nothing else.
 
-Before the API archived tasks this was handled by the DB cascade. Fix: filter archived
-tasks out of `list_due` and `list_reminders`, and decide whether
-`POST /api/reminders` / `POST /api/events` against an archived task should 409.
+Overlapping events are both counted by design (the system reports overlaps rather than
+guessing which is real), and the Review page warns for a whole period. But a month cell can
+read "10h · 5 events" with no hint the total is inflated. Add per-day overlap pairs to the
+payload so the month view can mark the day; do not compute it in the client.
 
-## Important — `find_or_create_by_name` resurrects archived tasks
+This got sharper in Plan 2: materialization now deliberately allows a template block to
+land on top of an event that spilled past midnight, so overlaps are an expected state, not
+an anomaly.
 
-`app/services/tasks.py` — the lookup matches on name only, with no status filter.
-
-Reproduce: archive the seeded "Work" task, then `POST /api/weeks/{next}/materialize`. Four
-new Work events attach to the archived task id. The task stays out of `GET /api/tasks`, so
-the calendar shows events whose task appears in no picker — and the Sunday cron silently
-re-populates it every week.
-
-Fix alongside the item above; the two share a cause. Note `PATCH {"status":"todo"}` does
-un-archive, so the user is not stuck.
-
-## Important — tag-existence validation is asymmetric
-
-`app/services/tasks.py`, `app/services/templates.py`
-
-`assert_tags_exist` guards events and rules but not tasks or template blocks, and the
-unguarded paths feed the guarded one. Reproduce: `POST /api/tasks {"tag_ids":[9999]}` →
-201, then create an event with no tags → it inherits `[9999]`. Or put `7777` on a template
-block and materialize. Those minutes sit permanently in `unassigned_minutes` with an id the
-UI cannot resolve to a name — which is exactly the failure the validation was added to
-prevent, reached from the other side.
-
-Fix: call `assert_tags_exist` from `tasks.create_task` / `update_task` and from
-`templates.create_block` / `update_block`.
-
-## Important — no way to genuinely remove a task
+### There is still no way to genuinely remove a task
 
 `app/services/tasks.py` — `delete_task` no longer exists; archiving is the only path.
 
-A task typo'd into existence via `task_name` on an event is permanent. Decide whether to
-add a hard delete guarded on "has no events" (mirroring the rule/report guard), which would
-also make the DB-level cascade reachable through the API again.
+A task typo'd into existence via `task_name` on an event is permanent, and now visible
+forever in the Tasks UI. Plan 3's agent will mint them by accident. Consider a hard delete
+guarded on "has no events", mirroring the rule/report guard — which would also make the
+DB-level cascade reachable through the API again.
 
-## Minor — the month payload still ships the ambiguous key name
+### `conftest.py` shares one session across every request in a test
 
-`app/services/calendar.py` emits `minutes_by_tag`, while `/api/analytics/evaluate` now
-emits `minutes_by_primary_tag` for the same semantics. Two names for one concept invites a
-frontend to assume they differ. Rename before Plan 2 consumes either.
+`backend/tests/conftest.py`
 
-## Minor — `GET /api/months/9999-12` returns 500
+Production yields a fresh session per request; the tests reuse one. It is why
+`populate_existing` was needed, and why all four stale-cache races were found by hand
+rather than by tests. A per-request session in the fixture would make that class of bug
+testable.
 
-`app/services/calendar.py` — `date(9999, 12, 1) + timedelta(days=31)` overflows.
-`parse_month_key` accepts year 9999, so clamp there.
+### Band arithmetic is duplicated in three client places
 
-## Minor — missing endpoints Plan 2's UI will need
+`frontend/src/components/RatioBars.tsx`, `GroupChart.tsx`, `frontend/src/hooks/useRules.ts`
 
-- `PATCH /api/templates/{id}` and an `update_template` service. The spec's §10 lists it and
-  nothing implements it, so a template cannot be renamed and `is_active` cannot be toggled;
-  switching templates relies on `get_active_template`'s `id.desc()` tiebreak with no
-  invariant enforcing a single active row.
-- A dry-run materialization endpoint for the Template editor's "Preview next week".
-- Partial-payload `PATCH /api/template-blocks/{id}` — it currently demands a full
-  `TemplateBlockCreate`.
-- Per-task hours rollup (week / month / all-time) and a "floating = `is_floating` AND has
-  no events" query, both of which the Task detail page needs. Without them the frontend
-  computes them, which pushes logic out of the service layer.
-- Embed the rule in `ReportOut`; the Review list otherwise needs an N+1 fetch to name the
-  rule version, which the spec's report header requires.
+The backend never emits band edges, so the client derives `share × (1 ∓ tolerance)` three
+times. Only `useRules`' version — previewing an unsaved draft — legitimately belongs in the
+client. None of the three knows about `TOLERANCE_EPSILON`, so at an exact edge (group C at
+8.0% of 6:3:1 @ 20%) the verdict pill says `pass` while the bar renders a hair outside its
+band. Harmless today; a change to tolerance semantics would diverge silently.
 
-## Minor — housekeeping
+Fix by adding `band_low` / `band_high` to each `GroupResult`.
 
-- `Event.template_block_id` is a plain `Integer`, not the FK the spec specifies, so
+### Upcoming and Recent don't deep-link the day
+
+`frontend/src/pages/TaskDetailPage.tsx` links to `/month` with no date, because
+`MonthPage`'s selection is local state. It reads as a broken link. A `?day=` query param on
+MonthPage is about ten lines.
+
+### "Scheduled" isn't what the spec says
+
+`frontend/src/pages/TasksPage.tsx` implements Scheduled as "not floating and not done".
+The spec says "has upcoming events", so a non-floating task with zero events currently
+files under Scheduled. Needs either an event-count field on `TaskOut` or a dedicated query.
+
+### "Upcoming" uses midnight, not now
+
+`app/services/tasks.py` — the boundary between Upcoming and Recent is midnight of the
+anchor day, so this morning's 07:00 event still counts as upcoming at 20:00.
+
+---
+
+## Minor
+
+- **Template column hour totals are computed client-side** (`TemplatePage.tsx`), re-deriving
+  the midnight-wrap convention. The labels are also ambiguous: "15h scheduled" is per-day
+  for both Mon–Fri and Every day, which invites reading it as a week total.
+- **No `pointercancel` handling** in `useEventDrag.ts` — a cancelled gesture leaves the
+  drag draft set, so the block stays drawn at a time it does not occupy. Related: during a
+  drag the block's label still shows the pre-drag time range.
+- **`VerdictPill` contrast** — white 11px text on `--pass` and `--under` is roughly 2.3:1,
+  below WCAG AA. And `--over` versus `--under` are hard to distinguish as the sole encoding
+  of a verdict on the `GroupChart` bars.
+- **The month day panel doesn't mark a bled-in event** as coming from the previous day; it
+  simply lists "23:00–07:00" under the later date.
+- **`materialize.isError` is never surfaced** on the week page, so "Generate from template"
+  with no active template (409) fails silently.
+- **`TaskDetailPage` commits an empty name** on blur; `TemplatePage` guards this and the
+  task page does not.
+- **`ReviewPage` accepts a cleared month input** and requests `month=""`.
+- **`RuleEditor` pickers use non-archived tags**, so a rule group or exclusion list holding
+  an archived tag renders as though the tag were absent.
+- **`GET /api/months/9999-12` returns 500** — `date(9999,12,1) + timedelta(days=31)`
+  overflows. Clamp in `parse_month_key`. Needs ~95,000 clicks on `›` to reach.
+- **`Event.template_block_id` is a plain Integer**, not the FK the spec specifies, so
   `delete_block` leaves provenance dangling.
-- `tests/conftest.py` shares one `AsyncSession` across every request in a test, unlike
-  production's per-request session. It is why `populate_existing` was needed, and it makes
-  a class of staleness bug untestable.
-- Move `RuleSpec` / `GroupSpec` out of `services/rules.py` so `analytics.py`'s "no ORM
-  imports" claim is structural rather than nominal.
-- `HTTP_422_UNPROCESSABLE_ENTITY` is deprecated in the installed Starlette (6 warnings).
-- Add an ORM-cascade test for Template → blocks; the DB-level cascades are covered but the
-  ORM `delete-orphan` relationship is not.
+- **`RuleSpec` / `GroupSpec` live in `services/rules.py`**, which imports models — so
+  `analytics.py`'s "no ORM imports" claim is true of names but not of the import graph.
+- **`HTTP_422_UNPROCESSABLE_ENTITY` is deprecated** in the installed Starlette (8 warnings).
+- **No ORM-cascade test for Template → blocks.** The DB-level cascades are covered; the
+  `delete-orphan` relationship is not.
+- **No UI path to create or delete an individual event, or to manage tags.**
+  `createEvent`, `deleteEvent`, `createTag`, `updateTag`, `archiveTag`, `deleteReport`,
+  `listTemplates` and `createTemplate` are all defined in the API client and unreferenced.
+  Events currently arrive only from the template; tags only from the seed.
+- **The bundle trips Vite's chunk-size warning** (recharts, ~692 kB / 208 kB gzip).
+  Irrelevant for a local single-user app.
+
+---
+
+## Environment notes, not defects
+
+- **Port 8000 is unusable on this machine.** A Docker container listens on `*:8000` over
+  the IPv6 wildcard and answers on both `localhost` and `127.0.0.1`, so a backend started
+  there is shadowed. Everything uses **8001**, and the Vite proxy targets `127.0.0.1:8001`
+  rather than `localhost` because `localhost` resolves IPv6 first here.
+- **`arch -arm64` is required** for every backend command. The venv interpreter is a
+  universal binary while the installed wheels are arm64; an x86_64 launch fails on
+  `pydantic_core`. An "incompatible architecture" ImportError is never a code failure.
+- **A stale `avery.db` plus an orphaned uvicorn** cost two separate tasks real debugging
+  time. Before trusting a number that looks slightly wrong, check
+  `lsof -nP -iTCP:8001 -sTCP:LISTEN` and reset with `alembic upgrade head` plus a reseed.
