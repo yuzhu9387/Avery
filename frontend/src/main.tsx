@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client'
 import { RouterProvider, createBrowserRouter } from 'react-router-dom'
 
 import App from './App'
+import { CalendarOverlayShell } from './components/CalendarOverlayShell'
 import EventDetailPage from './pages/EventDetailPage'
 import MonthPage from './pages/MonthPage'
 import RoutinePage from './pages/RoutinePage'
@@ -25,10 +26,18 @@ const router = createBrowserRouter([
       { index: true, element: <WeekPage /> },
       { path: 'events/:eventId', element: <EventDetailPage /> },
       { path: 'month', element: <MonthPage /> },
-      { path: 'tasks', element: <TasksPage /> },
       { path: 'tasks/:taskId', element: <TaskDetailPage /> },
-      { path: 'routine', element: <RoutinePage /> },
-      { path: 'rules', element: <RulesPage /> },
+      // Tasks/Routine/Rules open as a sub-window over the calendar rather than
+      // navigating away from it — see CalendarOverlayShell, which renders WeekPage
+      // as the base underneath and these three as its Outlet.
+      {
+        element: <CalendarOverlayShell />,
+        children: [
+          { path: 'tasks', element: <TasksPage /> },
+          { path: 'routine', element: <RoutinePage /> },
+          { path: 'rules', element: <RulesPage /> },
+        ],
+      },
       // The Review route is off for now. `pages/ReviewPage.tsx`, `hooks/useReports.ts`
       // and `components/GroupChart.tsx` are deliberately left on disk, and the
       // backend's /api/reports is untouched, so putting it back is this line plus

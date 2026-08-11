@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link, NavLink, Outlet } from 'react-router-dom'
+import { Link, Outlet } from 'react-router-dom'
 
 /** `railOpen` rides the outlet context so a page's own left-hand chrome
  *  (CalendarSidebar's mini-month/categories aside) can collapse in lockstep with
@@ -34,17 +34,6 @@ export default function App() {
         >
           Avery
         </Link>
-        <NavLink
-          to="/tasks"
-          className={({ isActive }) =>
-            [
-              'shrink-0 rounded-full border border-line px-3 py-1 text-sm font-bold transition-colors',
-              isActive ? 'bg-[var(--pale)] text-ink' : 'text-ink-muted hover:bg-[var(--pale)]/50 hover:text-ink',
-            ].join(' ')
-          }
-        >
-          Tasks
-        </NavLink>
       </header>
 
       <main className="min-h-0 flex-1 overflow-auto">

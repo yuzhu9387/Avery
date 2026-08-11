@@ -8,9 +8,15 @@ import { MiniMonth } from './MiniMonth'
 import { RatioBars } from './RatioBars'
 
 const FOOTER_LINK =
-  'block rounded-full px-3 py-1.5 text-sm font-bold transition-colors'
+  'flex items-center gap-2 rounded-full px-3 py-1.5 text-sm font-bold transition-colors'
 const FOOTER_LINK_ACTIVE = 'bg-[var(--pale)] text-ink'
 const FOOTER_LINK_INACTIVE = 'text-ink-muted hover:bg-[var(--pale)]/50 hover:text-ink'
+
+const FOOTER_LINKS = [
+  { to: '/tasks', emoji: '📋', label: 'Tasks' },
+  { to: '/routine', emoji: '🔁', label: 'Routine' },
+  { to: '/rules', emoji: '📐', label: 'Rules' },
+] as const
 
 /** The calendar's left-hand chrome: mini month, this week's rule ratios, and the
  *  category rail — shared verbatim by WeekPage and MonthPage so switching views
@@ -74,23 +80,24 @@ export function CalendarSidebar({
         </div>
       </div>
 
-      {/* Pinned outside the scroll region. Account and settings join Routine and
-       *  Rules down here once they exist — this is their future home. */}
+      {/* Pinned outside the scroll region. Tasks, Routine, and Rules each open as a
+       *  sub-window over the calendar (see CalendarOverlayShell) rather than
+       *  navigating away, so this rail — and the rest of the calendar underneath —
+       *  stays visible on all three. Account and settings join them down here once
+       *  they exist. */}
       <div className="shrink-0 border-t border-line p-3">
-        <NavLink
-          to="/routine"
-          className={({ isActive }) =>
-            [FOOTER_LINK, 'mb-0.5', isActive ? FOOTER_LINK_ACTIVE : FOOTER_LINK_INACTIVE].join(' ')
-          }
-        >
-          Routine
-        </NavLink>
-        <NavLink
-          to="/rules"
-          className={({ isActive }) => [FOOTER_LINK, isActive ? FOOTER_LINK_ACTIVE : FOOTER_LINK_INACTIVE].join(' ')}
-        >
-          Rules
-        </NavLink>
+        {FOOTER_LINKS.map(({ to, emoji, label }, i) => (
+          <NavLink
+            key={to}
+            to={to}
+            className={({ isActive }) =>
+              [FOOTER_LINK, i < FOOTER_LINKS.length - 1 ? 'mb-0.5' : '', isActive ? FOOTER_LINK_ACTIVE : FOOTER_LINK_INACTIVE].join(' ')
+            }
+          >
+            <span aria-hidden>{emoji}</span>
+            {label}
+          </NavLink>
+        ))}
       </div>
     </aside>
   )
