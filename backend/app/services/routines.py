@@ -349,6 +349,7 @@ async def materialize_week(
             end += timedelta(days=1)
         event = Event(
             task_id=task.id,
+            title=block.task_name,
             start_at=start,
             end_at=end,
             # Mirrors create_event: a block carrying no tags of its own inherits the

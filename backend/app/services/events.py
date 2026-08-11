@@ -67,8 +67,14 @@ async def create_event(session: AsyncSession, data: EventCreate) -> Event:
     if not tag_ids:
         tag_ids = list(task.tag_ids)
 
+    # title falls back to the caller's task_name, then to the resolved task's own
+    # name -- the latter covers the explicit-task_id path, which never supplies
+    # task_name at all.
+    title = data.title or data.task_name or task.name
+
     event = Event(
         task_id=task.id,
+        title=title,
         start_at=data.start_at,
         end_at=data.end_at,
         tag_ids=tag_ids,

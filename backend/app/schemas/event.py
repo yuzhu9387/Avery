@@ -8,6 +8,7 @@ from app.models.event import EventKind, EventSource
 class EventCreate(BaseModel):
     task_id: int | None = None
     task_name: str | None = None
+    title: str | None = None
     start_at: datetime
     end_at: datetime
     tag_ids: list[int] = Field(default_factory=list)
@@ -26,13 +27,14 @@ class EventCreate(BaseModel):
 
 
 class EventUpdate(BaseModel):
+    title: str | None = None
     start_at: datetime | None = None
     end_at: datetime | None = None
     tag_ids: list[int] | None = None
     notes: str | None = None
 
     # Every Event column here is nullable=False, so none of them may be nulled.
-    @field_validator("start_at", "end_at", "tag_ids", "notes")
+    @field_validator("title", "start_at", "end_at", "tag_ids", "notes")
     @classmethod
     def reject_explicit_null(cls, value):
         if value is None:
@@ -55,6 +57,7 @@ class EventOut(BaseModel):
 
     id: int
     task_id: int
+    title: str
     start_at: datetime
     end_at: datetime
     tag_ids: list[int]

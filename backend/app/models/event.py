@@ -25,6 +25,7 @@ class Event(Base):
     task_id: Mapped[int] = mapped_column(
         ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    title: Mapped[str] = mapped_column(String(200), default="", nullable=False)
     start_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
     end_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     tag_ids: Mapped[list[int]] = mapped_column(JSON, default=list, nullable=False)

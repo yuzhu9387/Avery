@@ -128,7 +128,7 @@ async def test_explicit_null_on_non_nullable_field_is_422_not_500(client):
         )
     ).json()["id"]
 
-    for field in ("start_at", "end_at", "tag_ids", "notes"):
+    for field in ("start_at", "end_at", "tag_ids", "notes", "title"):
         patched = await client.patch(f"/api/events/{event_id}", json={field: None})
         assert patched.status_code == 422, field
 
@@ -337,6 +337,68 @@ async def test_create_event_with_archived_tag_id_is_accepted(client):
         },
     )
     assert created.status_code == 201
+
+
+async def test_create_event_title_defaults_to_task_name(client):
+    created = await client.post(
+        "/api/events",
+        json={
+            "task_name": "Dentist",
+            "start_at": "2026-08-05T15:00:00",
+            "end_at": "2026-08-05T16:00:00",
+        },
+    )
+    assert created.status_code == 201
+    assert created.json()["title"] == "Dentist"
+
+
+async def test_create_event_title_defaults_to_the_resolved_tasks_name(client):
+    """The explicit-task_id path never supplies task_name, so title must fall
+    back further, to the task it resolved to."""
+    task_id = await _task(client, "Work block")
+    created = await client.post(
+        "/api/events",
+        json={
+            "task_id": task_id,
+            "start_at": "2026-08-03T09:30:00",
+            "end_at": "2026-08-03T16:30:00",
+        },
+    )
+    assert created.status_code == 201
+    assert created.json()["title"] == "Work block"
+
+
+async def test_create_event_title_can_be_set_explicitly(client):
+    task_id = await _task(client, "Work block")
+    created = await client.post(
+        "/api/events",
+        json={
+            "task_id": task_id,
+            "title": "Custom title",
+            "start_at": "2026-08-03T09:30:00",
+            "end_at": "2026-08-03T16:30:00",
+        },
+    )
+    assert created.status_code == 201
+    assert created.json()["title"] == "Custom title"
+
+
+async def test_patch_title(client):
+    task_id = await _task(client)
+    event_id = (
+        await client.post(
+            "/api/events",
+            json={
+                "task_id": task_id,
+                "start_at": "2026-08-03T09:00:00",
+                "end_at": "2026-08-03T10:00:00",
+            },
+        )
+    ).json()["id"]
+
+    patched = await client.patch(f"/api/events/{event_id}", json={"title": "Renamed"})
+    assert patched.status_code == 200
+    assert patched.json()["title"] == "Renamed"
 
 
 async def test_delete_event(client):
