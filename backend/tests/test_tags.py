@@ -97,3 +97,18 @@ async def test_archived_name_still_blocks_duplicates(client):
 
     dupe = await client.post("/api/tags", json={"name": "Work", "color": "#BDBD9B"})
     assert dupe.status_code == 409
+
+
+async def test_chinese_tag_name_round_trips(client):
+    """Tag names go through the same UTF-8 String column as everything else;
+    pin the round trip so a future encoding change can't silently mangle it.
+
+    Note: SQLite's default BINARY collation sorts Chinese names by UTF-8 code
+    point, not pinyin or stroke order — to a Chinese reader that ordering looks
+    arbitrary. This is a known, accepted limitation (it doesn't bite today
+    because the task list orders by created_at desc), so ordering is
+    deliberately not asserted anywhere in this suite.
+    """
+    created = await client.post("/api/tags", json={"name": "中文测试标签", "color": "#DA96A4"})
+    assert created.status_code == 201
+    assert created.json()["name"] == "中文测试标签"

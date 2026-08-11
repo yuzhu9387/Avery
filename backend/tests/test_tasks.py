@@ -220,3 +220,44 @@ async def test_task_rejects_an_unknown_tag_id(client):
     assert (
         await client.patch(f"/api/tasks/{ok['id']}", json={"tag_ids": [8888]})
     ).status_code == 422
+
+
+async def test_chinese_task_name_and_notes_round_trip_exactly(client):
+    """SQLite is UTF-8 by default, so this should already pass today. It exists
+    to catch a future encoding or serialization change quietly breaking Chinese
+    text — a regression that would be invisible in an English-only suite."""
+    created = await client.post(
+        "/api/tasks",
+        json={
+            "name": "陪娃去看牙医",
+            "tag_ids": [],
+            "notes": "记得带上医保卡和上次的检查报告。",
+        },
+    )
+    assert created.status_code == 201
+    task_id = created.json()["id"]
+
+    fetched = (await client.get(f"/api/tasks/{task_id}")).json()
+    assert fetched["name"] == "陪娃去看牙医"
+    assert fetched["notes"] == "记得带上医保卡和上次的检查报告。"
+    assert len(fetched["name"]) == 6  # character count, not byte count
+
+
+async def test_chinese_substring_search_matches_mid_string(session):
+    """LIKE must match on Chinese substrings, including mid-string. There is no
+    search endpoint yet, so this checks the SQL layer directly — swap to the API
+    once a search endpoint exists."""
+    from sqlalchemy import select
+
+    from app.models import Task
+
+    session.add(Task(name="陪娃去看牙医", tag_ids=[], notes="记得带上医保卡"))
+    await session.commit()
+
+    for pattern in ("%牙医%", "%陪娃%", "%医保卡%"):
+        found = (
+            await session.scalars(
+                select(Task).where(Task.name.like(pattern) | Task.notes.like(pattern))
+            )
+        ).all()
+        assert len(found) == 1, pattern
