@@ -7,15 +7,34 @@ export function CategoryRail({
   totalMinutes,
   hidden,
   onToggle,
+  onShowAll,
+  onHideAll,
 }: {
   tags: Tag[]
   minutesByTag: Record<string, number>
   totalMinutes: number
   hidden: Set<number>
   onToggle: (id: number) => void
+  onShowAll: () => void
+  onHideAll: () => void
 }) {
+  // "All" when something is hidden (click shows everything); "None" once nothing is
+  // — a single control whose label is always the opposite of the current state, so
+  // the same target both switches the whole list on and off.
+  const anyHidden = hidden.size > 0
   return (
     <div className="flex flex-col gap-2">
+      <div className="flex items-center justify-between">
+        <h2 className="text-xs font-bold uppercase tracking-wide text-ink-faint">Categories</h2>
+        <button
+          type="button"
+          className="text-[10px] font-bold uppercase tracking-wide text-ink-faint transition-colors hover:text-ink"
+          onClick={anyHidden ? onShowAll : onHideAll}
+          aria-label={anyHidden ? 'Show all categories' : 'Hide all categories'}
+        >
+          {anyHidden ? 'All' : 'None'}
+        </button>
+      </div>
       {tags.map((tag) => {
         const minutes = minutesByTag[String(tag.id)] ?? 0
         const isHidden = hidden.has(tag.id)

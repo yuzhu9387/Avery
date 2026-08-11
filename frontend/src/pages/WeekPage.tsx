@@ -79,7 +79,7 @@ export default function WeekPage() {
     () => (tags.isSuccess ? selectableTags.map((t) => t.id) : undefined),
     [tags.isSuccess, selectableTags],
   )
-  const { hidden, toggle } = useTagVisibility(selectableTagIds)
+  const { hidden, toggle, hideAll, showAll } = useTagVisibility(selectableTagIds)
   const { create, complete, uncomplete } = useEventMutations()
   const [slot, setSlot] = useState<SlotClick | null>(null)
 
@@ -180,16 +180,17 @@ export default function WeekPage() {
             <RatioBars groups={ratios.data.metrics.groups} tolerance={ratios.data.rule.tolerance} compact />
           )}
 
-          <h2 className="mb-3 mt-6 text-xs font-bold uppercase tracking-wide text-ink-faint">
-            Categories
-          </h2>
-          <CategoryRail
-            tags={selectableTags}
-            minutesByTag={ratios.data?.metrics.minutes_by_primary_tag ?? {}}
-            totalMinutes={ratios.data?.metrics.total_minutes ?? 0}
-            hidden={hidden}
-            onToggle={toggle}
-          />
+          <div className="mt-6">
+            <CategoryRail
+              tags={selectableTags}
+              minutesByTag={ratios.data?.metrics.minutes_by_primary_tag ?? {}}
+              totalMinutes={ratios.data?.metrics.total_minutes ?? 0}
+              hidden={hidden}
+              onToggle={toggle}
+              onShowAll={showAll}
+              onHideAll={hideAll}
+            />
+          </div>
         </aside>
       )}
 
