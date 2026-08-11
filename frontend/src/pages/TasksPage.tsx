@@ -110,6 +110,7 @@ export default function TasksPage() {
                         tagMap={tagMap}
                         event={nextUpcomingEvent(eventsByTask.get(task.id) ?? [], now)}
                         today={today}
+                        overdue={group.overdue}
                         onToggleDone={toggleDone}
                       />
                     ))}
@@ -193,18 +194,29 @@ function TaskRow({
   tagMap,
   event,
   today,
+  overdue,
   onToggleDone,
 }: {
   task: Task
   tagMap: ReturnType<typeof useTagMap>
   event: AveryEvent | null
   today: string
+  /** From the row's own due-date section, so "late" is decided in one place
+   *  (`groupActiveTasksByDueDate`) rather than recomputed per row and risking a row
+   *  that disagrees with the heading above it. */
+  overdue: boolean
   onToggleDone: (task: Task) => void
 }) {
   const extraTags = task.tag_ids.length - 1
 
   return (
-    <li className="flex items-center gap-3 border-b border-line px-3 py-2 last:border-b-0">
+    <li
+      className="flex items-center gap-3 border-b border-line px-3 py-2 last:border-b-0"
+      // A left bar rather than a red row: tinting the whole row would fight the
+      // category chip for meaning, and colour alone is not a signal everyone can
+      // read — hence the "Overdue" word as well.
+      style={overdue ? { boxShadow: 'inset 3px 0 0 0 var(--over)' } : undefined}
+    >
       <input
         type="checkbox"
         checked={task.status === 'done'}
@@ -214,7 +226,20 @@ function TaskRow({
       <Link to={`/tasks/${task.id}`} className="flex-1 truncate text-sm text-ink hover:underline">
         {task.name}
       </Link>
-      <span className="shrink-0 text-xs text-ink-faint">{timeLabel(event, today)}</span>
+      {overdue && (
+        <span
+          className="shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide"
+          style={{ background: 'var(--blush)', color: 'var(--over)' }}
+        >
+          Overdue
+        </span>
+      )}
+      <span
+        className="shrink-0 text-xs"
+        style={{ color: overdue ? 'var(--over)' : 'var(--ink-faint)' }}
+      >
+        {timeLabel(event, today)}
+      </span>
       {task.tag_ids.length > 0 && (
         <div className="flex shrink-0 items-center gap-1">
           <TagChip tag={tagMap.get(task.tag_ids[0])} size="xs" />

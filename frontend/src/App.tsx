@@ -30,9 +30,15 @@ export default function App() {
         <Link
           to="/"
           title="Avery — go to this week"
-          className="shrink-0 text-lg font-bold tracking-tight transition-opacity hover:opacity-70"
+          className="flex shrink-0 items-center gap-2 transition-opacity hover:opacity-70"
         >
-          Avery
+          {/* Served at 256px for a 32px slot so it stays sharp on a retina screen.
+           *  Cropped to the mark with a transparent field, so no radius or tile
+           *  treatment is needed — it sits directly on the header. `alt=""` because
+           *  the wordmark beside it already names the link; a second "Avery" would
+           *  only be announced twice. */}
+          <img src="/avery-logo.png" alt="" width={32} height={32} className="shrink-0" />
+          <span className="text-lg font-bold tracking-tight">Avery</span>
         </Link>
       </header>
 

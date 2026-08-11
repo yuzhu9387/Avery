@@ -276,7 +276,11 @@ export default function EventDetailPage() {
         </p>
       )}
 
-      <div className="mt-6 flex flex-wrap gap-2">
+      {/* The two actions that change or remove *this* event sit together on the left;
+       *  the links that navigate elsewhere are grouped to the right. Delete used to
+       *  carry `ml-auto`, which pushed it to the far edge — a long way from the other
+       *  control acting on the same event. */}
+      <div className="mt-6 flex flex-wrap items-center gap-2">
         <button
           type="button"
           className="rounded-[8px] px-3 py-1.5 text-sm font-bold"
@@ -285,9 +289,20 @@ export default function EventDetailPage() {
         >
           {isDone ? 'Mark not done' : 'Mark done'}
         </button>
+        <button
+          type="button"
+          className="rounded-[8px] px-3 py-1.5 text-sm transition-colors hover:bg-[var(--blush)]/40"
+          style={{ color: 'var(--over)' }}
+          disabled={remove.isPending}
+          onClick={() => remove.mutate()}
+        >
+          {remove.isPending ? 'Deleting…' : 'Delete'}
+        </button>
+
+        <div className="ml-auto flex flex-wrap items-center gap-2">
         <Link
           to={`/tasks/${data.task_id}`}
-          className="rounded-[8px] px-3 py-1.5 text-sm text-ink-muted"
+          className="rounded-[8px] px-3 py-1.5 text-sm text-ink-muted transition-colors hover:bg-[var(--pale)]/50 hover:text-ink"
         >
           Open the task
         </Link>
@@ -304,15 +319,7 @@ export default function EventDetailPage() {
             Edit routine block
           </Link>
         )}
-        <button
-          type="button"
-          className="ml-auto rounded-[8px] px-3 py-1.5 text-sm"
-          style={{ color: 'var(--over)' }}
-          disabled={remove.isPending}
-          onClick={() => remove.mutate()}
-        >
-          {remove.isPending ? 'Deleting…' : 'Delete'}
-        </button>
+        </div>
       </div>
 
       {(complete.isError || uncomplete.isError) && (

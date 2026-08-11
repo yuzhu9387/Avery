@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 
 import { ApiError } from '../api/client'
 import type { Routine, RoutineBlock, Tag } from '../api/types'
 import { BlockForm } from '../components/BlockForm'
+import { InlineText } from '../components/InlineText'
 import { Modal } from '../components/Modal'
 import { VersionDeleteButton } from '../components/VersionDeleteButton'
 import type { ColumnKey } from '../hooks/useRoutine'
@@ -86,6 +88,11 @@ export default function RoutinePage() {
 
   const [modal, setModal] = useState<ModalState | null>(null)
   const [selectedId, setSelectedId] = useState<number | null>(null)
+  // `?block=<id>` arrives from an event's "Edit routine block" link. A routine event
+  // does not own its own times — the block that generated it does — so that link has
+  // to land on the block itself, not merely on this page.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const blockParam = searchParams.get('block')
   // Which version's delete is armed ("×" already clicked once, next click confirms)
   // and the error from the version whose delete most recently failed (the 409 for
   // trying to delete the active version, surfaced right on that card).
@@ -103,6 +110,30 @@ export default function RoutinePage() {
   useEffect(() => {
     if (selectedId !== null && !versions.some((v) => v.id === selectedId)) setSelectedId(null)
   }, [selectedId, versions])
+
+  // Tune to whichever version owns the requested block and open it for editing.
+  useEffect(() => {
+    if (!blockParam || versions.length === 0) return
+    const id = Number(blockParam)
+    const owner = Number.isFinite(id)
+      ? versions.find((v) => v.blocks.some((b) => b.id === id))
+      : undefined
+    const block = owner?.blocks.find((b) => b.id === id)
+    if (owner && block) {
+      setSelectedId(owner.id)
+      setModal({ mode: 'edit', block })
+    }
+    // Consumed either way, including when the block has since been deleted. Leaving
+    // it in the URL would re-open the modal the instant the user closed it, and a
+    // reload would spring it again.
+    setSearchParams(
+      (prev) => {
+        prev.delete('block')
+        return prev
+      },
+      { replace: true },
+    )
+  }, [blockParam, versions, setSearchParams])
 
   const grouped = useMemo(() => {
     const map: Record<ColumnKey, RoutineBlock[]> = {
@@ -480,26 +511,26 @@ function BlockPill({
 
   return (
     <span
-      className="group relative flex w-[164px] max-w-full shrink-0 flex-col gap-1 rounded-[10px] border border-line p-2 pr-5"
+      className="group relative flex w-[196px] max-w-full shrink-0 flex-col gap-1 rounded-[10px] border border-line p-2 pr-5"
       style={{ background: 'var(--surface-raised)' }}
     >
       <button type="button" onClick={onEdit} title={detail || undefined} className="flex min-w-0 flex-col gap-1 text-left">
         <span className="text-[11px] tabular-nums leading-none text-ink-faint">
           {block.start_time.slice(0, 5)}–{block.end_time.slice(0, 5)}
         </span>
-        <span className="truncate text-[13px] font-medium leading-tight text-ink">{block.task_name}</span>
+        <span className="truncate text-[13px] font-medium leading-[1.4] text-ink">{block.task_name}</span>
         <span className="flex min-w-0 items-center gap-1.5">
           <span
             aria-hidden
             className="h-1.5 w-1.5 shrink-0 rounded-full"
             style={{ background: tag?.color ?? 'var(--line-strong)' }}
           />
-          <span className="truncate text-[11px] leading-none text-ink-muted">
+          <span className="truncate text-[11px] leading-[1.45] text-ink-muted">
             {tag?.name ?? 'Uncategorized'}
           </span>
         </span>
         {custom && (
-          <span className="truncate text-[10px] leading-none text-ink-faint">{formatDaySet(block.days)}</span>
+          <span className="truncate text-[10px] leading-[1.45] text-ink-faint">{formatDaySet(block.days)}</span>
         )}
       </button>
       <button
@@ -542,11 +573,6 @@ function VersionRow({
   onArmDelete: () => void
   onConfirmDelete: () => void
 }) {
-  // Local drafts so typing does not fire a mutation per keystroke; committed on blur,
-  // and only when the value actually changed.
-  const [name, setName] = useState<string | null>(null)
-  const [note, setNote] = useState<string | null>(null)
-
   const totalMinutes = version.blocks.reduce((sum, b) => sum + blockMinutes(b), 0)
 
   return (
@@ -584,30 +610,19 @@ function VersionRow({
     >
       <div className="flex items-center gap-2">
         <div className="min-w-0 flex-1">
-          <input
-            value={name ?? version.name}
-            onChange={(e) => setName(e.target.value)}
-            onClick={(e) => e.stopPropagation()}
-            onBlur={() => {
-              const next = (name ?? '').trim()
-              if (name !== null && next && next !== version.name) onRename(next)
-              setName(null)
-            }}
-            aria-label={`Name of version ${version.id}`}
-            className="w-full truncate border-none bg-transparent text-[13px] font-medium leading-tight text-ink outline-none focus:ring-0"
+          <InlineText
+            value={version.name}
+            onCommit={onRename}
+            ariaLabel={`Name of version ${version.id}`}
+            className="text-[13px] font-medium leading-[1.4] text-ink"
           />
-          <input
-            value={note ?? version.note}
-            onChange={(e) => setNote(e.target.value)}
-            onClick={(e) => e.stopPropagation()}
-            onBlur={() => {
-              const next = (note ?? '').trim()
-              if (note !== null && next !== version.note) onNote(next)
-              setNote(null)
-            }}
+          <InlineText
+            value={version.note}
+            onCommit={onNote}
+            allowEmpty
             placeholder="Add a note"
-            aria-label={`Note on version ${version.id}`}
-            className="w-full truncate border-none bg-transparent text-[11px] leading-tight text-ink-muted outline-none focus:ring-0"
+            ariaLabel={`Note on version ${version.id}`}
+            className="text-[11px] leading-[1.4] text-ink-muted"
           />
         </div>
 

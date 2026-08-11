@@ -32,14 +32,19 @@ export function IconTasks(props: IconProps) {
   )
 }
 
-/** A cycle/two-arrows glyph for Routine. */
+/** A cycle/two-arrows glyph for Routine.
+ *
+ *  Drawn to the same optical box as its neighbours (x 1.75–14.25), not just the same
+ *  16px `viewBox`. It used to occupy x 3–13 while Tasks and Rules ran the full
+ *  1.75–14.25, so the three rows shared a bounding box but this glyph read as
+ *  indented and a size smaller — which is what looked misaligned in the sidebar. */
 export function IconRoutine(props: IconProps) {
   return (
     <svg {...BASE} aria-hidden {...props}>
-      <path d="M3.5 5A5 5 0 0 1 13 7.8" />
-      <path d="M13 4.5v3.3h-3.3" />
-      <path d="M12.5 11A5 5 0 0 1 3 8.2" />
-      <path d="M3 11.5V8.2h3.3" />
+      <path d="M2.38 4.25A6.25 6.25 0 0 1 14.25 7.75" />
+      <path d="M14.25 3.63v4.12h-4.12" />
+      <path d="M13.63 11.75A6.25 6.25 0 0 1 1.75 8.25" />
+      <path d="M1.75 12.38V8.25h4.12" />
     </svg>
   )
 }

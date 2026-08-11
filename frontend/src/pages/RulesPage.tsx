@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { ApiError } from '../api/client'
 import type { Rule } from '../api/types'
 import { Modal } from '../components/Modal'
+import { InlineText } from '../components/InlineText'
 import { RuleEditor } from '../components/RuleEditor'
 import { VersionDeleteButton } from '../components/VersionDeleteButton'
 import {
@@ -172,6 +173,8 @@ export default function RulesPage() {
                 deleting={deleteRule.isPending && deleteRule.variables === rule.id}
                 deleteError={deleteError?.id === rule.id ? deleteError.message : null}
                 onSelect={() => setSelectedId(rule.id)}
+                onRename={(name) => updateRule.mutate({ id: rule.id, body: { name } })}
+                onNote={(note) => updateRule.mutate({ id: rule.id, body: { note } })}
                 onArmDelete={() => {
                   setDeleteError(null)
                   setArmedDeleteId(rule.id)
@@ -294,6 +297,8 @@ function VersionRow({
   deleting,
   deleteError,
   onSelect,
+  onRename,
+  onNote,
   onArmDelete,
   onConfirmDelete,
 }: {
@@ -303,6 +308,8 @@ function VersionRow({
   deleting: boolean
   deleteError: string | null
   onSelect: () => void
+  onRename: (name: string) => void
+  onNote: (note: string) => void
   onArmDelete: () => void
   onConfirmDelete: () => void
 }) {
@@ -334,7 +341,12 @@ function VersionRow({
     >
       <div className="flex items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="truncate text-sm font-medium text-ink">{rule.name}</span>
+          <InlineText
+            value={rule.name}
+            onCommit={onRename}
+            ariaLabel={`Name of ${rule.name}`}
+            className="text-sm font-medium text-ink"
+          />
           {active && (
             <span
               className="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium text-white"
@@ -355,7 +367,14 @@ function VersionRow({
       <div className="text-xs text-ink-faint">
         {rule.effective_from} – {rule.effective_to ?? 'present'} · {ratios}
       </div>
-      {rule.note && <div className="truncate text-xs text-ink-muted">"{rule.note}"</div>}
+      <InlineText
+        value={rule.note}
+        onCommit={onNote}
+        allowEmpty
+        placeholder="Add a note"
+        ariaLabel={`Note on ${rule.name}`}
+        className="text-xs text-ink-muted"
+      />
       {deleteError && <div className="text-xs text-[var(--over)]">{deleteError}</div>}
     </li>
   )

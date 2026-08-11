@@ -73,7 +73,14 @@ export function CalendarOverlayShell() {
       <WeekPage />
 
       <div
-        className={['absolute inset-0 z-40 flex flex-col', railOpen ? 'left-56' : 'left-0'].join(
+        // `z-[60]`, not `z-40`. WeekGrid's sticky chrome climbs to z-50 (its top-left
+        // corner cell) and z-40 (the day headers) so it can sit above a dragged card
+        // at z-20. At z-40 this panel tied with the headers and lost outright to the
+        // corner — which is why a white square stayed pinned over the top-left of
+        // every page opened on top of the calendar. The overlay is the modal surface,
+        // so it is the thing that must be raised; lowering the grid's sticky layers
+        // would put dragged cards back on top of the header they scroll under.
+        className={['absolute inset-0 z-[60] flex flex-col', railOpen ? 'left-56' : 'left-0'].join(
           ' ',
         )}
         style={{ background: 'var(--surface)' }}
