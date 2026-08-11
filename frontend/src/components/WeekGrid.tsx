@@ -94,14 +94,20 @@ export function WeekGrid({
           minWidth: GUTTER_PX + 7 * columnPx,
         }}
       >
-        {/* corner: sticky on both axes so it covers the gutter under the header */}
-        <div className="sticky left-0 top-0 z-30 border-b border-line bg-surface" />
+        {/* corner: sticky on both axes so it covers the gutter under the header.
+            z-index stack (back to front): resting cards/gridlines (auto/0) < now-line
+            (10) < a dragging EventBlock (20, set in EventBlock.tsx) < gutter (30) <
+            day headers (40) < this corner (50). The day-column divs have no z-index of
+            their own, so a dragging card's z-20 is compared directly against these
+            sticky siblings in the same stacking context — it must stay under all
+            three, which is why they sit at 30/40/50 rather than 10/20/30. */}
+        <div className="sticky left-0 top-0 z-50 border-b border-line bg-surface" />
         {days.map((d, i) => {
           const isToday = i === todayIndex
           return (
             <div
               key={i}
-              className="sticky top-0 z-20 border-b border-l border-line bg-surface px-2 py-2 text-center"
+              className="sticky top-0 z-40 border-b border-l border-line bg-surface px-2 py-2 text-center"
             >
               <div className="text-[11px] uppercase tracking-wide text-ink-faint">
                 {DAY_NAMES[i]}
@@ -125,7 +131,7 @@ export function WeekGrid({
         })}
 
         <div
-          className="sticky left-0 z-10 bg-surface"
+          className="sticky left-0 z-30 bg-surface"
           style={{ height: heightPx }}
         >
           {marks.map((h) => (
