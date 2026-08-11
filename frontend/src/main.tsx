@@ -24,18 +24,19 @@ const router = createBrowserRouter([
     element: <App />,
     children: [
       { index: true, element: <WeekPage /> },
-      { path: 'events/:eventId', element: <EventDetailPage /> },
       { path: 'month', element: <MonthPage /> },
-      { path: 'tasks/:taskId', element: <TaskDetailPage /> },
-      // Tasks/Routine/Rules open as a sub-window over the calendar rather than
-      // navigating away from it — see CalendarOverlayShell, which renders WeekPage
-      // as the base underneath and these three as its Outlet.
+      // Every other page opens as a full-bleed sub-window over the calendar rather
+      // than navigating away from it — see CalendarOverlayShell, which renders
+      // WeekPage (sidebar included) as the base underneath and these routes as its
+      // Outlet, so the sidebar is universal across the whole app.
       {
         element: <CalendarOverlayShell />,
         children: [
           { path: 'tasks', element: <TasksPage /> },
           { path: 'routine', element: <RoutinePage /> },
           { path: 'rules', element: <RulesPage /> },
+          { path: 'tasks/:taskId', element: <TaskDetailPage /> },
+          { path: 'events/:eventId', element: <EventDetailPage /> },
         ],
       },
       // The Review route is off for now. `pages/ReviewPage.tsx`, `hooks/useReports.ts`

@@ -54,8 +54,8 @@ export default function TasksPage() {
   const now = useMemo(() => formatLocal(new Date()), [])
 
   const paged = useMemo(
-    () => paginateActiveTasksByDueDate(tasks, today, page, PAGE_SIZE),
-    [tasks, today, page],
+    () => paginateActiveTasksByDueDate(tasks, today, page, PAGE_SIZE, eventsByTask),
+    [tasks, today, page, eventsByTask],
   )
   const done = useMemo(() => doneTasksSorted(tasks, DONE_CAP), [tasks])
   const totalDone = useMemo(() => tasks.filter((t) => t.status === 'done').length, [tasks])

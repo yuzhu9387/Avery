@@ -43,6 +43,16 @@ async def test_two_event_cards_with_one_name_share_a_task(client):
     assert a["task_id"] == b["task_id"]
 
 
+async def test_task_card_creation_sets_the_minted_tasks_due_date_to_the_event_end_date(client):
+    created = await _event(
+        client, kind="task", name="Renew passport",
+        start="2026-08-03T09:00:00", end="2026-08-03T10:00:00",
+    )
+    task = await client.get(f"/api/tasks/{created['task_id']}")
+    assert task.status_code == 200
+    assert task.json()["due_date"] == "2026-08-03"
+
+
 async def test_two_task_cards_with_one_name_get_their_own_tasks(client):
     # A task card is a to-do with a slot. Sharing one Task would mean completing
     # Monday's card silently completes Tuesday's, and the Tasks page and the

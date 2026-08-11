@@ -4,6 +4,7 @@ import { NavLink } from 'react-router-dom'
 import { ApiError } from '../api/client'
 import type { Evaluation, Tag } from '../api/types'
 import { CategoryRail } from './CategoryRail'
+import { IconRoutine, IconRules, IconTasks } from './icons'
 import { MiniMonth } from './MiniMonth'
 import { RatioBars } from './RatioBars'
 
@@ -13,9 +14,9 @@ const FOOTER_LINK_ACTIVE = 'bg-[var(--pale)] text-ink'
 const FOOTER_LINK_INACTIVE = 'text-ink-muted hover:bg-[var(--pale)]/50 hover:text-ink'
 
 const FOOTER_LINKS = [
-  { to: '/tasks', emoji: '📋', label: 'Tasks' },
-  { to: '/routine', emoji: '🔁', label: 'Routine' },
-  { to: '/rules', emoji: '📐', label: 'Rules' },
+  { to: '/tasks', Icon: IconTasks, label: 'Tasks' },
+  { to: '/routine', Icon: IconRoutine, label: 'Routine' },
+  { to: '/rules', Icon: IconRules, label: 'Rules' },
 ] as const
 
 /** The calendar's left-hand chrome: mini month, this week's rule ratios, and the
@@ -86,7 +87,7 @@ export function CalendarSidebar({
        *  stays visible on all three. Account and settings join them down here once
        *  they exist. */}
       <div className="shrink-0 border-t border-line p-3">
-        {FOOTER_LINKS.map(({ to, emoji, label }, i) => (
+        {FOOTER_LINKS.map(({ to, Icon, label }, i) => (
           <NavLink
             key={to}
             to={to}
@@ -94,7 +95,7 @@ export function CalendarSidebar({
               [FOOTER_LINK, i < FOOTER_LINKS.length - 1 ? 'mb-0.5' : '', isActive ? FOOTER_LINK_ACTIVE : FOOTER_LINK_INACTIVE].join(' ')
             }
           >
-            <span aria-hidden>{emoji}</span>
+            <Icon />
             {label}
           </NavLink>
         ))}

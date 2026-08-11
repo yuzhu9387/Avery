@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
-import type { Task } from '../api/types'
+import type { AveryEvent, Task } from '../api/types'
 import {
   doneTasksSorted,
   formatDueDate,
   groupActiveTasksByDueDate,
+  latestEventEndDate,
   paginate,
   paginateActiveTasksByDueDate,
 } from './taskGroups'
@@ -23,6 +24,21 @@ function makeTask(overrides: Partial<Task> & { id: number }): Task {
     is_floating: false,
     priority: 'normal',
     created_at: '2026-08-01T00:00:00',
+    completed_at: null,
+    ...overrides,
+  }
+}
+
+/** Every field an `AveryEvent` needs, with sane defaults. */
+function makeEvent(overrides: Partial<AveryEvent> & { id: number; task_id: number }): AveryEvent {
+  return {
+    start_at: '2026-08-12T09:00:00',
+    end_at: '2026-08-12T10:00:00',
+    tag_ids: [],
+    source: 'manual',
+    routine_block_id: null,
+    notes: '',
+    kind: 'event',
     completed_at: null,
     ...overrides,
   }
@@ -89,6 +105,56 @@ describe('groupActiveTasksByDueDate', () => {
     const groups = groupActiveTasksByDueDate(tasks, '2026-08-11')
     expect(groups).toHaveLength(1)
     expect(groups[0].tasks.map((t) => t.id)).toEqual([1, 2])
+  })
+
+  it('falls back to the latest event end date when due_date is null and events are given', () => {
+    const tasks = [makeTask({ id: 1, due_date: null })]
+    const eventsByTask = new Map([
+      [
+        1,
+        [
+          makeEvent({ id: 10, task_id: 1, end_at: '2026-08-12T10:00:00' }),
+          makeEvent({ id: 11, task_id: 1, end_at: '2026-08-15T10:00:00' }),
+        ],
+      ],
+    ])
+    const groups = groupActiveTasksByDueDate(tasks, '2026-08-11', eventsByTask)
+    expect(groups).toHaveLength(1)
+    expect(groups[0].dueDate).toBe('2026-08-15')
+  })
+
+  it('prefers a real due_date over the event fallback', () => {
+    const tasks = [makeTask({ id: 1, due_date: '2026-08-20' })]
+    const eventsByTask = new Map([[1, [makeEvent({ id: 10, task_id: 1, end_at: '2026-08-12T10:00:00' })]]])
+    const groups = groupActiveTasksByDueDate(tasks, '2026-08-11', eventsByTask)
+    expect(groups[0].dueDate).toBe('2026-08-20')
+  })
+
+  it('still lands in "No due date" when neither due_date nor an event is available', () => {
+    const tasks = [makeTask({ id: 1, due_date: null })]
+    const groups = groupActiveTasksByDueDate(tasks, '2026-08-11', new Map())
+    expect(groups.at(-1)).toMatchObject({ key: 'no-due-date', dueDate: null })
+  })
+
+  it('lands in "No due date" when no event lookup is given at all, same as before', () => {
+    const tasks = [makeTask({ id: 1, due_date: null })]
+    const groups = groupActiveTasksByDueDate(tasks, '2026-08-11')
+    expect(groups.at(-1)).toMatchObject({ key: 'no-due-date', dueDate: null })
+  })
+})
+
+describe('latestEventEndDate', () => {
+  it('returns null for an empty list', () => {
+    expect(latestEventEndDate([])).toBeNull()
+  })
+
+  it('returns the YYYY-MM-DD of the latest end_at among several events', () => {
+    const events = [
+      makeEvent({ id: 1, task_id: 1, end_at: '2026-08-12T10:00:00' }),
+      makeEvent({ id: 2, task_id: 1, end_at: '2026-08-20T09:00:00' }),
+      makeEvent({ id: 3, task_id: 1, end_at: '2026-08-15T23:00:00' }),
+    ]
+    expect(latestEventEndDate(events)).toBe('2026-08-20')
   })
 })
 

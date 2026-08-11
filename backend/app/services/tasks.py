@@ -129,9 +129,11 @@ async def archive_task(session: AsyncSession, task_id: int) -> Task | None:
     return task
 
 
-async def create_by_name(session: AsyncSession, name: str, tag_ids: list[int]) -> Task:
+async def create_by_name(
+    session: AsyncSession, name: str, tag_ids: list[int], due_date: date | None = None
+) -> Task:
     """Always mints a new Task. Used where reuse would be wrong — see create_event."""
-    task = Task(name=name, tag_ids=list(tag_ids))
+    task = Task(name=name, tag_ids=list(tag_ids), due_date=due_date)
     session.add(task)
     await session.commit()
     await session.refresh(task)

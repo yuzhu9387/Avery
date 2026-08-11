@@ -55,8 +55,13 @@ async def create_event(session: AsyncSession, data: EventCreate) -> Event:
     elif data.kind == EventKind.TASK:
         # A task card is 1:1 with its Task so completion can sync without two cards
         # fighting over one status. Event cards keep reusing a Task by name, so
-        # repeated "Standup" blocks still roll up to a single task's minutes.
-        task = await task_service.create_by_name(session, data.task_name, tag_ids)
+        # repeated "Standup" blocks still roll up to a single task's minutes. The
+        # freshly minted Task's due date defaults to the card's own end date — a
+        # task card is a to-do with a slot, so the slot's end is naturally when
+        # it's due, rather than leaving it undated until the user sets one by hand.
+        task = await task_service.create_by_name(
+            session, data.task_name, tag_ids, due_date=data.end_at.date()
+        )
     else:
         task = await task_service.find_or_create_by_name(session, data.task_name, tag_ids)
     if not tag_ids:

@@ -1,5 +1,5 @@
 import type { AveryEvent, Task } from '../api/types'
-import { parseLocal } from './datetime'
+import { formatDate, parseLocal } from './datetime'
 
 const MONTH_SHORT = [
   'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
@@ -25,24 +25,50 @@ function isDoneTask(task: Task): boolean {
   return task.status === 'done'
 }
 
-/** Groups active (not done, not archived) tasks by `due_date` into ascending-sorted
- *  sections, with a final "No due date" bucket for `due_date === null` — omitted
- *  entirely when nothing is undated, so callers never render an empty section. A
- *  section is `overdue` when its date is strictly before `today` (an injected
- *  `YYYY-MM-DD`, not `new Date()`, so this stays pure and testable). */
-export function groupActiveTasksByDueDate(tasks: Task[], today: string): DueGroup[] {
+/** The `YYYY-MM-DD` of the latest of a set of events' `end_at`, or `null` when
+ *  there are none — the fallback due date for a task whose own `due_date` is
+ *  `null` but that has already been scheduled onto the calendar. */
+export function latestEventEndDate(events: AveryEvent[]): string | null {
+  if (events.length === 0) return null
+  const latest = events.reduce((a, b) => (a.end_at > b.end_at ? a : b))
+  return formatDate(parseLocal(latest.end_at))
+}
+
+/** A task's `due_date` when it has one; otherwise the latest end date among its own
+ *  events (via `eventsByTask`, keyed by `task_id`), so a scheduled-but-undated task
+ *  groups under a real date instead of always falling to "No due date"; `null` when
+ *  neither is available (or no event lookup was given at all). */
+function effectiveDueDate(task: Task, eventsByTask: Map<number, AveryEvent[]> | undefined): string | null {
+  if (task.due_date !== null) return task.due_date
+  if (!eventsByTask) return null
+  return latestEventEndDate(eventsByTask.get(task.id) ?? [])
+}
+
+/** Groups active (not done, not archived) tasks by `due_date` — falling back to the
+ *  latest end date of the task's own events when `due_date` is `null`, see
+ *  `effectiveDueDate` — into ascending-sorted sections, with a final "No due date"
+ *  bucket for whatever still has neither — omitted entirely when nothing is undated,
+ *  so callers never render an empty section. A section is `overdue` when its date is
+ *  strictly before `today` (an injected `YYYY-MM-DD`, not `new Date()`, so this stays
+ *  pure and testable). */
+export function groupActiveTasksByDueDate(
+  tasks: Task[],
+  today: string,
+  eventsByTask?: Map<number, AveryEvent[]>,
+): DueGroup[] {
   const active = tasks.filter(isActiveTask)
   const byDate = new Map<string, Task[]>()
   const noDueDate: Task[] = []
 
   for (const task of active) {
-    if (task.due_date === null) {
+    const dueDate = effectiveDueDate(task, eventsByTask)
+    if (dueDate === null) {
       noDueDate.push(task)
       continue
     }
-    const bucket = byDate.get(task.due_date)
+    const bucket = byDate.get(dueDate)
     if (bucket) bucket.push(task)
-    else byDate.set(task.due_date, [task])
+    else byDate.set(dueDate, [task])
   }
 
   // `YYYY-MM-DD` strings sort correctly as plain strings.
@@ -106,11 +132,12 @@ export function paginateActiveTasksByDueDate(
   today: string,
   page: number,
   pageSize = 20,
+  eventsByTask?: Map<number, AveryEvent[]>,
 ): PagedDueGroups {
-  const flat = groupActiveTasksByDueDate(tasks, today).flatMap((g) => g.tasks)
+  const flat = groupActiveTasksByDueDate(tasks, today, eventsByTask).flatMap((g) => g.tasks)
   const sliced = paginate(flat, page, pageSize)
   return {
-    groups: groupActiveTasksByDueDate(sliced.items, today),
+    groups: groupActiveTasksByDueDate(sliced.items, today, eventsByTask),
     page: sliced.page,
     pageCount: sliced.pageCount,
     totalActive: flat.length,
