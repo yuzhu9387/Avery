@@ -1,4 +1,4 @@
-import { useCallback } from 'react'
+import { useCallback, useRef } from 'react'
 
 import type { AveryEvent, Tag, Task } from '../api/types'
 import type { DragDraft } from '../hooks/useEventDrag'
@@ -44,10 +44,26 @@ function GridCard({
   onDragStart: (event: AveryEvent, origin: GestureOrigin) => void
   onPointerDownResize?: (e: React.PointerEvent, edge: 'start' | 'end') => void
 }) {
+  // Open and toggle-complete are deferred (up to DOUBLE_CLICK_MS after pointer-up),
+  // and a long press waits LONG_PRESS_MS before it resolves — `invalidateCalendar`
+  // refetches on every mutation, so a new `event` object (and new `onOpen` etc.
+  // identities) can arrive mid-gesture. A plain closure over the press-start values
+  // would run the deferred callback against whatever was current when the press
+  // began; this ref is written every render so the callbacks below always read the
+  // latest, regardless of when in the gesture they actually fire.
+  const latest = useRef({ event, onOpen, onToggleComplete, onDragStart })
+  latest.current = { event, onOpen, onToggleComplete, onDragStart }
+
   const { onPointerDown } = useCardGestures({
-    onOpen: useCallback(() => onOpen(event), [onOpen, event]),
-    onToggleComplete: useCallback((p) => onToggleComplete(event, p), [onToggleComplete, event]),
-    onDragStart: useCallback((o) => onDragStart(event, o), [onDragStart, event]),
+    onOpen: useCallback(() => latest.current.onOpen(latest.current.event), []),
+    onToggleComplete: useCallback(
+      (p: { x: number; y: number }) => latest.current.onToggleComplete(latest.current.event, p),
+      [],
+    ),
+    onDragStart: useCallback(
+      (o: GestureOrigin) => latest.current.onDragStart(latest.current.event, o),
+      [],
+    ),
   })
 
   return (
