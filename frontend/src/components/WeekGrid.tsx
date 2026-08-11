@@ -13,7 +13,7 @@ import {
 import { EventBlock } from './EventBlock'
 
 const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-const GRID_COLUMNS = '56px repeat(7, minmax(0, 1fr))'
+const GUTTER_PX = 56
 
 /** "6" -> "6 AM", "13" -> "1 PM", "24" (midnight, the grid's floor label for the next
  *  day) -> "12 AM". */
@@ -32,6 +32,9 @@ export function WeekGrid({
   onEventPointerDownMove,
   onEventPointerDownResize,
   draft,
+  pxPerHour,
+  columnPx,
+  scrollRef,
 }: {
   weekStart: Date
   events: AveryEvent[]
@@ -44,6 +47,12 @@ export function WeekGrid({
   ) => (e: React.PointerEvent, edge: 'start' | 'end') => void
   /** The event mid-drag, if any, and its live pixel offset. */
   draft?: DragDraft | null
+  /** Pixels per hour at the current zoom. */
+  pxPerHour: number
+  /** Minimum width of one day column at the current zoom. */
+  columnPx: number
+  /** The scroll container, so the page can position it and zoom can anchor to it. */
+  scrollRef?: React.RefObject<HTMLDivElement | null>
 }) {
   const marks = hourMarks()
   const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i))
@@ -65,121 +74,138 @@ export function WeekGrid({
       parseLocal(event.start_at),
       parseLocal(event.end_at),
       weekStart,
-      GRID.basePxPerHour,
+      pxPerHour,
     )
     for (const segment of segments) {
       segmentsByDay[segment.dayIndex].push({ event, segment })
     }
   }
 
+  const heightPx = gridHeightPx(pxPerHour)
+
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div ref={scrollRef} className="h-full min-h-0 overflow-auto">
       <div
-        className="grid shrink-0 border-b border-line"
-        style={{ gridTemplateColumns: GRID_COLUMNS }}
+        className="grid"
+        style={{
+          gridTemplateColumns: `${GUTTER_PX}px repeat(7, minmax(0, 1fr))`,
+          // When the columns' minimum exceeds the container the grid overflows and the
+          // container scrolls horizontally; below that the 1fr columns just fill it.
+          minWidth: GUTTER_PX + 7 * columnPx,
+        }}
       >
-        <div />
+        {/* corner: sticky on both axes so it covers the gutter under the header */}
+        <div className="sticky left-0 top-0 z-30 border-b border-line bg-surface" />
         {days.map((d, i) => {
           const isToday = i === todayIndex
           return (
-            <div key={i} className="border-l border-line px-2 py-2 text-center">
+            <div
+              key={i}
+              className="sticky top-0 z-20 border-b border-l border-line bg-surface px-2 py-2 text-center"
+            >
               <div className="text-[11px] uppercase tracking-wide text-ink-faint">
                 {DAY_NAMES[i]}
               </div>
               <div
                 className={
                   isToday
-                    ? 'mx-auto mt-0.5 flex size-6 items-center justify-center rounded-full text-sm font-semibold text-ink'
-                    : 'mt-0.5 text-sm text-ink-muted'
+                    ? 'mx-auto mt-0.5 flex size-7 items-center justify-center rounded-full text-sm font-bold'
+                    : 'mt-0.5 text-sm font-medium text-ink-muted'
                 }
-                style={isToday ? { background: 'var(--pale)' } : undefined}
+                style={
+                  isToday
+                    ? { background: 'var(--rose-deep)', color: 'var(--surface-raised)' }
+                    : undefined
+                }
               >
                 {d.getDate()}
               </div>
             </div>
           )
         })}
-      </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="grid" style={{ gridTemplateColumns: GRID_COLUMNS }}>
-          <div className="relative" style={{ height: gridHeightPx(GRID.basePxPerHour) }}>
-            {marks.map((h) => (
-              <div
-                key={h}
-                className="absolute inset-x-0 -translate-y-1/2 pr-2 text-right text-[11px] text-ink-faint"
-                style={{ top: minutesToPx((h - GRID.startHour) * 60, GRID.basePxPerHour) }}
-              >
-                {hourLabel(h)}
-              </div>
-            ))}
-          </div>
-
-          {days.map((_, dayIndex) => {
-            const isToday = dayIndex === todayIndex
-            return (
-              <div
-                key={dayIndex}
-                className="relative border-l border-line"
-                style={{ height: gridHeightPx(GRID.basePxPerHour) }}
-              >
-                {isToday && (
-                  <div
-                    className="absolute inset-0"
-                    style={{ background: 'var(--pale)', opacity: 0.28 }}
-                  />
-                )}
-                {marks
-                  .filter((h) => h !== GRID.startHour)
-                  .map((h) => (
-                    <div
-                      key={h}
-                      className="absolute inset-x-0 border-t border-line"
-                      style={{ top: minutesToPx((h - GRID.startHour) * 60, GRID.basePxPerHour) }}
-                    />
-                  ))}
-                {isToday && showNowLine && (
-                  <div
-                    className="absolute inset-x-0 h-px"
-                    style={{ top: minutesToPx(nowMinutes, GRID.basePxPerHour), background: 'var(--rose-deep)' }}
-                  />
-                )}
-                {segmentsByDay[dayIndex].map(({ event, segment }) => {
-                  const isDragging = draft?.eventId === event.id
-                  let renderSegment = segment
-                  let dragOffset: { dx: number; dy: number } | undefined
-
-                  if (isDragging && draft) {
-                    if (draft.kind === 'move') {
-                      dragOffset = { dx: draft.dx, dy: draft.dy }
-                    } else if (draft.edge === 'end') {
-                      const heightPx = Math.max(GRID.minBlockPx, segment.heightPx + draft.dy)
-                      renderSegment = { ...segment, heightPx }
-                    } else {
-                      const heightPx = Math.max(GRID.minBlockPx, segment.heightPx - draft.dy)
-                      const topPx = segment.topPx + (segment.heightPx - heightPx)
-                      renderSegment = { ...segment, topPx, heightPx }
-                    }
-                  }
-
-                  return (
-                    <EventBlock
-                      key={`${event.id}-${segment.dayIndex}`}
-                      event={event}
-                      segment={renderSegment}
-                      tag={tagMap.get(event.tag_ids[0])}
-                      title={taskMap.get(event.task_id)?.name ?? `Task #${event.task_id}`}
-                      onPointerDownMove={onEventPointerDownMove?.(event, segment)}
-                      onPointerDownResize={onEventPointerDownResize?.(event, segment)}
-                      isDragging={isDragging}
-                      dragOffset={dragOffset}
-                    />
-                  )
-                })}
-              </div>
-            )
-          })}
+        <div
+          className="sticky left-0 z-10 bg-surface"
+          style={{ height: heightPx }}
+        >
+          {marks.map((h) => (
+            <div
+              key={h}
+              className="absolute right-0 w-full -translate-y-1/2 pr-2 text-right text-[11px] text-ink-faint"
+              style={{ top: minutesToPx((h - GRID.startHour) * 60, pxPerHour) }}
+            >
+              {h === GRID.startHour ? '' : hourLabel(h)}
+            </div>
+          ))}
         </div>
+
+        {days.map((_, dayIndex) => {
+          const isToday = dayIndex === todayIndex
+          return (
+            <div
+              key={dayIndex}
+              className="relative border-l border-line"
+              style={{ height: heightPx }}
+            >
+              {isToday && (
+                <div
+                  className="pointer-events-none absolute inset-0"
+                  style={{ background: 'var(--pale)', opacity: 0.28 }}
+                />
+              )}
+              {marks
+                .filter((h) => h !== GRID.startHour)
+                .map((h) => (
+                  <div
+                    key={h}
+                    className="pointer-events-none absolute inset-x-0 border-t border-line"
+                    style={{ top: minutesToPx((h - GRID.startHour) * 60, pxPerHour) }}
+                  />
+                ))}
+              {isToday && showNowLine && (
+                <div
+                  className="pointer-events-none absolute inset-x-0 z-10 h-px"
+                  style={{
+                    top: minutesToPx(nowMinutes, pxPerHour),
+                    background: 'var(--rose-deep)',
+                  }}
+                />
+              )}
+              {segmentsByDay[dayIndex].map(({ event, segment }) => {
+                const isDragging = draft?.eventId === event.id
+                let renderSegment = segment
+                let dragOffset: { dx: number; dy: number } | undefined
+
+                if (isDragging && draft) {
+                  if (draft.kind === 'move') {
+                    dragOffset = { dx: draft.dx, dy: draft.dy }
+                  } else if (draft.edge === 'end') {
+                    const heightPx = Math.max(GRID.minBlockPx, segment.heightPx + draft.dy)
+                    renderSegment = { ...segment, heightPx }
+                  } else {
+                    const heightPx = Math.max(GRID.minBlockPx, segment.heightPx - draft.dy)
+                    const topPx = segment.topPx + (segment.heightPx - heightPx)
+                    renderSegment = { ...segment, topPx, heightPx }
+                  }
+                }
+
+                return (
+                  <EventBlock
+                    key={`${event.id}-${segment.dayIndex}`}
+                    event={event}
+                    segment={renderSegment}
+                    tag={tagMap.get(event.tag_ids[0])}
+                    title={taskMap.get(event.task_id)?.name ?? `Task #${event.task_id}`}
+                    onPointerDownMove={onEventPointerDownMove?.(event, segment)}
+                    onPointerDownResize={onEventPointerDownResize?.(event, segment)}
+                    isDragging={isDragging}
+                    dragOffset={dragOffset}
+                  />
+                )
+              })}
+            </div>
+          )
+        })}
       </div>
     </div>
   )

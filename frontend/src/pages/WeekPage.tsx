@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { ApiError } from '../api/client'
@@ -12,6 +12,7 @@ import { useEventDrag } from '../hooks/useEventDrag'
 import { useTagMap } from '../hooks/useTags'
 import { useWeek, useWeekRatios } from '../hooks/useWeek'
 import { addDays, formatDate, mondayOf } from '../lib/datetime'
+import { GRID, minutesToPx } from '../lib/geometry'
 
 const NAV_BUTTON = 'rounded-[8px] px-3 py-1.5 text-sm text-ink-muted transition-colors hover:bg-[var(--pale)]/50 hover:text-ink'
 
@@ -36,6 +37,18 @@ export default function WeekPage() {
   const ratios = useWeekRatios(monday, week.isSuccess)
   const tagMap = useTagMap()
   const { draft, onPointerDownMove, onPointerDownResize } = useEventDrag()
+
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const scrolledOnce = useRef(false)
+
+  // Open on waking hours. Without this the full-day grid opens on six empty rows.
+  useEffect(() => {
+    if (scrolledOnce.current || !week.isSuccess) return
+    const el = scrollRef.current
+    if (!el) return
+    scrolledOnce.current = true
+    el.scrollTop = minutesToPx(7 * 60, GRID.basePxPerHour)
+  }, [week.isSuccess])
 
   const tasksQuery = useQuery({
     // Archived tasks are included for the same reason useTagMap includes archived
@@ -160,6 +173,9 @@ export default function WeekPage() {
               onEventPointerDownMove={onPointerDownMove}
               onEventPointerDownResize={onPointerDownResize}
               draft={draft}
+              scrollRef={scrollRef}
+              pxPerHour={GRID.basePxPerHour}
+              columnPx={GRID.baseColumnPx}
             />
           )}
         </div>
