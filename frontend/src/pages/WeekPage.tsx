@@ -9,10 +9,11 @@ import type { Task } from '../api/types'
 import { RatioBars } from '../components/RatioBars'
 import { WeekGrid } from '../components/WeekGrid'
 import { useEventDrag } from '../hooks/useEventDrag'
+import { useGridZoom } from '../hooks/useGridZoom'
 import { useTagMap } from '../hooks/useTags'
 import { useWeek, useWeekRatios } from '../hooks/useWeek'
 import { addDays, formatDate, mondayOf } from '../lib/datetime'
-import { GRID, minutesToPx } from '../lib/geometry'
+import { minutesToPx } from '../lib/geometry'
 
 const NAV_BUTTON = 'rounded-[8px] px-3 py-1.5 text-sm text-ink-muted transition-colors hover:bg-[var(--pale)]/50 hover:text-ink'
 
@@ -40,6 +41,7 @@ export default function WeekPage() {
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const scrolledOnce = useRef(false)
+  const { pxPerHour, columnPx } = useGridZoom(scrollRef)
 
   // Open on waking hours. Without this the full-day grid opens on six empty rows.
   useEffect(() => {
@@ -47,7 +49,10 @@ export default function WeekPage() {
     const el = scrollRef.current
     if (!el) return
     scrolledOnce.current = true
-    el.scrollTop = minutesToPx(7 * 60, GRID.basePxPerHour)
+    el.scrollTop = minutesToPx(7 * 60, pxPerHour)
+    // pxPerHour is intentionally excluded: this effect must run once on mount
+    // (guarded by scrolledOnce above) and must not re-fire when zoom changes it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [week.isSuccess])
 
   const tasksQuery = useQuery({
@@ -174,8 +179,8 @@ export default function WeekPage() {
               onEventPointerDownResize={onPointerDownResize}
               draft={draft}
               scrollRef={scrollRef}
-              pxPerHour={GRID.basePxPerHour}
-              columnPx={GRID.baseColumnPx}
+              pxPerHour={pxPerHour}
+              columnPx={columnPx}
             />
           )}
         </div>
