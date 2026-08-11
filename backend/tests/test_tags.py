@@ -28,7 +28,7 @@ async def test_update_and_archive_tag(client):
     assert patched.status_code == 200
     assert patched.json()["color"] == "#BDBD9B"
 
-    archived = await client.delete(f"/api/tags/{tag_id}")
+    archived = await client.post(f"/api/tags/{tag_id}/archive")
     assert archived.status_code == 200
     assert archived.json()["archived"] is True
 
@@ -38,7 +38,7 @@ async def test_archived_tag_stays_resolvable_by_id(client):
     tag_id = (
         await client.post("/api/tags", json={"name": "Old", "color": "#DEDECF"})
     ).json()["id"]
-    await client.delete(f"/api/tags/{tag_id}")
+    await client.post(f"/api/tags/{tag_id}/archive")
 
     fetched = await client.get(f"/api/tags/{tag_id}")
     assert fetched.status_code == 200
@@ -52,7 +52,7 @@ async def test_archived_tags_hidden_from_list_by_default(client):
     drop = (
         await client.post("/api/tags", json={"name": "Drop", "color": "#DA96A4"})
     ).json()["id"]
-    await client.delete(f"/api/tags/{drop}")
+    await client.post(f"/api/tags/{drop}/archive")
 
     assert [t["id"] for t in (await client.get("/api/tags")).json()] == [keep]
 
@@ -64,12 +64,12 @@ async def test_archiving_is_idempotent(client):
     tag_id = (
         await client.post("/api/tags", json={"name": "Twice", "color": "#C9A88F"})
     ).json()["id"]
-    assert (await client.delete(f"/api/tags/{tag_id}")).status_code == 200
-    assert (await client.delete(f"/api/tags/{tag_id}")).status_code == 200
+    assert (await client.post(f"/api/tags/{tag_id}/archive")).status_code == 200
+    assert (await client.post(f"/api/tags/{tag_id}/archive")).status_code == 200
 
 
 async def test_archive_missing_tag_returns_404(client):
-    assert (await client.delete("/api/tags/999")).status_code == 404
+    assert (await client.post("/api/tags/999/archive")).status_code == 404
 
 
 async def test_explicit_null_on_non_nullable_field_is_422_not_500(client):
@@ -93,7 +93,7 @@ async def test_archived_name_still_blocks_duplicates(client):
     tag_id = (
         await client.post("/api/tags", json={"name": "Work", "color": "#DA96A4"})
     ).json()["id"]
-    await client.delete(f"/api/tags/{tag_id}")
+    await client.post(f"/api/tags/{tag_id}/archive")
 
     dupe = await client.post("/api/tags", json={"name": "Work", "color": "#BDBD9B"})
     assert dupe.status_code == 409

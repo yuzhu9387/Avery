@@ -324,7 +324,7 @@ async def test_create_event_with_archived_tag_id_is_accepted(client):
     tag_id = (
         await client.post("/api/tags", json={"name": "Old tag", "color": "#DA96A4"})
     ).json()["id"]
-    await client.delete(f"/api/tags/{tag_id}")  # archives, row still exists
+    await client.post(f"/api/tags/{tag_id}/archive")  # archives, row still exists
 
     task_id = await _task(client)
     created = await client.post(

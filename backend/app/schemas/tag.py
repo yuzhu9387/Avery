@@ -4,6 +4,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 class TagCreate(BaseModel):
     name: str = Field(min_length=1, max_length=64)
     color: str = Field(pattern=r"^#[0-9A-Fa-f]{6}$")
+    description: str = ""
     icon: str | None = None
     sort_order: int = 0
 
@@ -11,6 +12,7 @@ class TagCreate(BaseModel):
 class TagUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=64)
     color: str | None = Field(default=None, pattern=r"^#[0-9A-Fa-f]{6}$")
+    description: str | None = None
     icon: str | None = None
     sort_order: int | None = None
     archived: bool | None = None
@@ -30,6 +32,7 @@ class TagOut(BaseModel):
     id: int
     name: str
     color: str
+    description: str
     icon: str | None
     sort_order: int
     archived: bool

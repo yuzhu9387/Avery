@@ -3,7 +3,7 @@ from collections.abc import Sequence
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Tag
+from app.models import Event, Tag
 from app.schemas.tag import TagCreate, TagUpdate
 
 
@@ -17,6 +17,14 @@ class UnknownTagIds(Exception):
     def __init__(self, ids: list[int]) -> None:
         super().__init__(", ".join(str(i) for i in ids))
         self.ids = ids
+
+
+class TagInUse(Exception):
+    """Raised when a delete is refused because events still carry the tag."""
+
+    def __init__(self, count: int) -> None:
+        self.count = count
+        super().__init__(f"{count} event(s) still use this category")
 
 
 async def assert_tags_exist(session: AsyncSession, tag_ids: Sequence[int]) -> None:
@@ -72,6 +80,25 @@ async def update_tag(session: AsyncSession, tag_id: int, data: TagUpdate) -> Tag
     await session.commit()
     await session.refresh(tag)
     return tag
+
+
+async def delete_tag(session: AsyncSession, tag_id: int) -> bool:
+    """Really deletes — but only when nothing points at it.
+
+    Events store tag ids in a JSON column, so a delete cannot cascade. Stripping the
+    id from historical events instead would silently rewrite every ratio and every
+    stored Review report, which is why an in-use tag is refused rather than cleaned up.
+    """
+    tag = await session.get(Tag, tag_id)
+    if tag is None:
+        return False
+    rows = (await session.scalars(select(Event.tag_ids))).all()
+    count = sum(1 for tag_ids in rows if tag_id in (tag_ids or []))
+    if count:
+        raise TagInUse(count)
+    await session.delete(tag)
+    await session.commit()
+    return True
 
 
 async def archive_tag(session: AsyncSession, tag_id: int) -> Tag | None:

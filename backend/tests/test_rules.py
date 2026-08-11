@@ -110,6 +110,6 @@ async def test_archived_tag_id_in_rule_is_still_accepted(client):
     await _seed_tags(client)
     tags = (await client.get("/api/tags", params={"include_archived": True})).json()
     tag_8 = next(t["id"] for t in tags if t["name"] == "Tag8")
-    await client.delete(f"/api/tags/{tag_8}")  # archives, does not remove the row
+    await client.post(f"/api/tags/{tag_8}/archive")  # archives, does not remove the row
 
     assert (await client.post("/api/rules", json=RULE_BODY)).status_code == 201

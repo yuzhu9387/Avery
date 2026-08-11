@@ -80,14 +80,14 @@ async def test_reseed_with_a_renamed_seed_tag_is_409_not_500(client):
 
 
 async def test_reseed_succeeds_when_a_seed_tag_is_merely_archived(client):
-    """Archiving IS this app's delete, so the row still exists and its id must still
-    resolve. A re-seed must succeed and keep referencing the archived tag."""
+    """Archiving preserves the row so its id still resolves. A re-seed must succeed
+    and keep referencing the archived tag."""
     await client.post("/api/seed")
     tags = {t["name"]: t["id"] for t in (await client.get("/api/tags")).json()}
     rule_id = (await client.get("/api/rules/active")).json()["id"]
 
     assert (await client.delete(f"/api/rules/{rule_id}")).status_code == 204
-    assert (await client.delete(f"/api/tags/{tags['Personal']}")).status_code == 200
+    assert (await client.post(f"/api/tags/{tags['Personal']}/archive")).status_code == 200
 
     again = await client.post("/api/seed")
     assert again.status_code == 200
