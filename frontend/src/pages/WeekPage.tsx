@@ -39,21 +39,25 @@ export default function WeekPage() {
   const tagMap = useTagMap()
   const { draft, onPointerDownMove, onPointerDownResize } = useEventDrag()
 
-  const scrollRef = useRef<HTMLDivElement>(null)
+  // A callback ref (via state) rather than a plain useRef: the grid only mounts once
+  // `week.isSuccess` (see the conditional render below), so on a cold load a plain
+  // ref's object identity never changes and an effect keyed on it would attach to
+  // nothing and never retry. Keying zoom and the mount-scroll effect on this state
+  // value instead makes them re-run whenever the actual DOM node appears, changes,
+  // or disappears.
+  const [gridEl, setGridEl] = useState<HTMLDivElement | null>(null)
   const scrolledOnce = useRef(false)
-  const { pxPerHour, columnPx } = useGridZoom(scrollRef)
+  const { pxPerHour, columnPx } = useGridZoom(gridEl)
 
   // Open on waking hours. Without this the full-day grid opens on six empty rows.
   useEffect(() => {
-    if (scrolledOnce.current || !week.isSuccess) return
-    const el = scrollRef.current
-    if (!el) return
+    if (scrolledOnce.current || !gridEl) return
     scrolledOnce.current = true
-    el.scrollTop = minutesToPx(7 * 60, pxPerHour)
-    // pxPerHour is intentionally excluded: this effect must run once on mount
+    gridEl.scrollTop = minutesToPx(7 * 60, pxPerHour)
+    // pxPerHour is intentionally excluded: this effect must run once per grid mount
     // (guarded by scrolledOnce above) and must not re-fire when zoom changes it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [week.isSuccess])
+  }, [gridEl])
 
   const tasksQuery = useQuery({
     // Archived tasks are included for the same reason useTagMap includes archived
@@ -119,7 +123,7 @@ export default function WeekPage() {
         )}
       </aside>
 
-      <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <div className="flex items-center gap-3 border-b border-line px-4 py-3">
           <div className="flex items-center gap-0.5">
             <button
@@ -178,7 +182,7 @@ export default function WeekPage() {
               onEventPointerDownMove={onPointerDownMove}
               onEventPointerDownResize={onPointerDownResize}
               draft={draft}
-              scrollRef={scrollRef}
+              scrollRef={setGridEl}
               pxPerHour={pxPerHour}
               columnPx={columnPx}
             />

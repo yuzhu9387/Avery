@@ -20,12 +20,17 @@ interface GestureLikeEvent extends Event {
  * `gesture*` events, handled here for the same reason.
  *
  * Zoom is deliberately not persisted: it is a reading posture, not a preference.
+ *
+ * Takes the DOM node itself (typically from a callback ref stored in state), not a
+ * `RefObject`. The grid this listens on only exists once its data has loaded, so a
+ * plain `useRef`'s stable identity would make an effect keyed on it run once, find
+ * `.current === null`, and never retry. Keying this effect on the node value instead
+ * makes it re-run whenever the node appears, is replaced, or disappears.
  */
-export function useGridZoom(ref: React.RefObject<HTMLDivElement | null>) {
+export function useGridZoom(el: HTMLDivElement | null) {
   const [zoom, setZoom] = useState(1)
 
   useEffect(() => {
-    const el = ref.current
     if (!el) return
 
     /** Scale by `factor`, keeping the grid point under the cursor under the cursor. */
@@ -80,7 +85,7 @@ export function useGridZoom(ref: React.RefObject<HTMLDivElement | null>) {
       el.removeEventListener('gesturestart', onGestureStart)
       el.removeEventListener('gesturechange', onGestureChange)
     }
-  }, [ref])
+  }, [el])
 
   return {
     zoom,

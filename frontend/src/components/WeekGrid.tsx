@@ -51,8 +51,11 @@ export function WeekGrid({
   pxPerHour: number
   /** Minimum width of one day column at the current zoom. */
   columnPx: number
-  /** The scroll container, so the page can position it and zoom can anchor to it. */
-  scrollRef?: React.RefObject<HTMLDivElement | null>
+  /** The scroll container, so the page can position it and zoom can anchor to it. A
+   *  `React.Ref` (object or callback) rather than a plain `RefObject`: the page hands
+   *  down a callback ref backed by state so it can react to the node appearing,
+   *  changing, or disappearing across mounts. */
+  scrollRef?: React.Ref<HTMLDivElement>
 }) {
   const marks = hourMarks()
   const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i))
