@@ -100,7 +100,12 @@ export function QuickCreatePopover({
           className="mb-3 w-full border-b-2 pb-1 text-base font-bold outline-none"
           style={{ borderColor: 'var(--rose-deep)', background: 'transparent' }}
           onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && submit()}
+          onKeyDown={(e) => {
+            // An IME commits its composition with Enter, and the browser reports that
+            // keydown with isComposing set. Without this guard, typing 陪娃去看牙医 and
+            // pressing Enter to accept the characters would create the event instead.
+            if (e.key === 'Enter' && !e.nativeEvent.isComposing) submit()
+          }}
         />
 
         <div className="mb-3 flex gap-1">
