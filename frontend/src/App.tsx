@@ -25,29 +25,42 @@ export default function App() {
   const [controls, setControls] = useState<React.ReactNode>(null)
   const location = useLocation()
   const navigate = useNavigate()
+  // The switcher can only truthfully describe these two routes. Elsewhere it would
+  // have to render a selection that doesn't match where the user actually is, so it
+  // is omitted rather than shown with a misleading value — the rail's own highlighted
+  // link already communicates "you are somewhere else."
+  const isWeekOrMonth = location.pathname === '/' || location.pathname === '/month'
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex shrink-0 items-center gap-3 border-b border-line bg-surface px-4 py-2">
-        <button
-          type="button"
-          aria-label="Toggle sidebar"
-          className="rounded-full px-2 py-1 text-lg text-ink-muted transition-colors hover:bg-[var(--pale)]/50"
-          onClick={() => setRailOpen((v) => !v)}
-        >
-          ☰
-        </button>
-        <span className="shrink-0 text-lg font-bold tracking-tight">Avery</span>
-        {controls}
-        <select
-          value={location.pathname === '/month' ? '/month' : '/'}
-          className="ml-auto rounded-[8px] px-2 py-1 text-sm font-bold"
-          style={{ background: 'var(--pale)' }}
-          onChange={(e) => navigate(e.target.value)}
-        >
-          <option value="/">Week</option>
-          <option value="/month">Month</option>
-        </select>
+      {/* `justify-between` (not `ml-auto` on the switcher) anchors the right-hand
+       *  group, so the left-hand group (hamburger, wordmark, controls) stays put
+       *  whether or not the switcher renders — it never depended on the switcher's
+       *  own margin to hold its position. */}
+      <header className="flex shrink-0 items-center justify-between gap-3 border-b border-line bg-surface px-4 py-2">
+        <div className="flex min-w-0 items-center gap-3">
+          <button
+            type="button"
+            aria-label="Toggle sidebar"
+            className="rounded-full px-2 py-1 text-lg text-ink-muted transition-colors hover:bg-[var(--pale)]/50"
+            onClick={() => setRailOpen((v) => !v)}
+          >
+            ☰
+          </button>
+          <span className="shrink-0 text-lg font-bold tracking-tight">Avery</span>
+          {controls}
+        </div>
+        {isWeekOrMonth && (
+          <select
+            value={location.pathname}
+            className="shrink-0 rounded-[8px] px-2 py-1 text-sm font-bold"
+            style={{ background: 'var(--pale)' }}
+            onChange={(e) => navigate(e.target.value)}
+          >
+            <option value="/">Week</option>
+            <option value="/month">Month</option>
+          </select>
+        )}
       </header>
 
       <div className="flex min-h-0 flex-1">
