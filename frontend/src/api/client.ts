@@ -9,6 +9,25 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * A human-readable message for anything that can come back as a mutation's
+ * `error`, or `null` when there is nothing to show.
+ *
+ * `unwrap` below only throws `ApiError` when the response completed but was
+ * not ok. A `fetch()` that never gets a response — offline, DNS failure,
+ * CORS, a timeout — rejects with a plain `TypeError` (or something else
+ * entirely), not an `ApiError`. An `instanceof ApiError` check alone treats
+ * that case as "no error" and the UI shows nothing while quietly failing to
+ * save, so every non-`ApiError` branch below must still return a string.
+ * Do not collapse this back to a single `instanceof` check.
+ */
+export function errorMessage(error: unknown): string | null {
+  if (error == null) return null
+  if (error instanceof ApiError) return error.detail
+  if (error instanceof Error && error.message) return error.message
+  return 'Something went wrong. Please try again.'
+}
+
 async function unwrap<T>(res: Response): Promise<T> {
   if (res.status === 204) return undefined as T
   const text = await res.text()

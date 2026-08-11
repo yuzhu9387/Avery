@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 
-import { ApiError } from '../api/client'
+import { ApiError, errorMessage } from '../api/client'
 import { invalidateCalendar } from '../api/invalidate'
 import { qk } from '../api/keys'
 import { listTasks } from '../api/tasks'
@@ -218,7 +218,7 @@ export default function WeekPage() {
           slot={slot}
           tags={tags.data ?? []}
           isPending={create.isPending}
-          error={create.error instanceof ApiError ? create.error.detail : null}
+          error={errorMessage(create.error)}
           onClose={() => {
             setSlot(null)
             create.reset()
