@@ -1,23 +1,27 @@
 import { useCallback, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useOutletContext } from 'react-router-dom'
 
+import type { HeaderSlot } from '../App'
 import { listEvents } from '../api/events'
 import { qk } from '../api/keys'
 import { listTasks } from '../api/tasks'
 import type { AveryEvent, MonthDay, Task } from '../api/types'
+import { CalendarSidebar } from '../components/CalendarSidebar'
+import { CalendarToolbar } from '../components/CalendarToolbar'
 import { Confetti, type Burst } from '../components/Confetti'
 import { DayTagBar } from '../components/DayTagBar'
 import { MonthChip } from '../components/MonthChip'
 import { TagChip } from '../components/TagChip'
 import { useEventMutations } from '../hooks/useEventMutations'
+import { useHideRoutine } from '../hooks/useHideRoutine'
 import { useMonth } from '../hooks/useMonth'
-import { useTagMap } from '../hooks/useTags'
-import { addDays, formatDate, formatLocal, formatMinutes, formatTimeRange, parseLocal } from '../lib/datetime'
+import { useTagMap, useTags } from '../hooks/useTags'
+import { useTagVisibility } from '../hooks/useTagVisibility'
+import { useWeek, useWeekRatios } from '../hooks/useWeek'
+import { addDays, formatDate, formatLocal, formatMinutes, formatTimeRange, mondayOf, parseLocal } from '../lib/datetime'
+import { isEventVisible } from '../lib/tagVisibility'
 import { type MonthCell, buildCells } from '../lib/monthGrid'
-
-const NAV_BUTTON =
-  'rounded-[8px] px-3 py-1.5 text-sm text-ink-muted transition-colors hover:bg-[var(--pale)]/50 hover:text-ink'
 
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -41,11 +45,28 @@ function addMonths(d: Date, n: number): Date {
 }
 
 export default function MonthPage() {
+  const { railOpen } = useOutletContext<HeaderSlot>()
   const [viewMonth, setViewMonth] = useState(() => startOfMonth(new Date()))
   const [selected, setSelected] = useState<string | null>(null)
   const [burst, setBurst] = useState<Burst | null>(null)
   const clearBurst = useCallback(() => setBurst(null), [])
   const navigate = useNavigate()
+
+  // The sidebar's mini-month/ratios/categories are the same regardless of which
+  // month the grid is browsing — they always describe the *actual* current week,
+  // exactly as they do on WeekPage. `useState` (not a bare call) keeps the value
+  // stable across this component's own re-renders, matching WeekPage's pattern.
+  const [thisWeekMonday] = useState(() => mondayOf(new Date()))
+  const week = useWeek(thisWeekMonday)
+  const ratios = useWeekRatios(thisWeekMonday, week.isSuccess)
+  const tags = useTags()
+  const selectableTags = useMemo(() => (tags.data ?? []).filter((t) => !t.archived), [tags.data])
+  const selectableTagIds = useMemo(
+    () => (tags.isSuccess ? selectableTags.map((t) => t.id) : undefined),
+    [tags.isSuccess, selectableTags],
+  )
+  const { hidden, toggle } = useTagVisibility(selectableTagIds)
+  const { hideRoutine, toggle: toggleHideRoutine } = useHideRoutine()
 
   const month = useMonth(viewMonth)
   const tagMap = useTagMap()
@@ -71,13 +92,25 @@ export default function MonthPage() {
     return map
   }, [tasksQuery.data])
 
+  // The hidden-category and hide-routine toggles only ever affect which cards draw
+  // client-side, here and in DayPanel below — the aggregate totals each cell shows
+  // (from `month.data`, the server month payload) are untouched, same as their
+  // per-day minutes always have been regardless of the rail's checkboxes.
+  const visibleEvents = useMemo(
+    () =>
+      (eventsQuery.data ?? []).filter(
+        (e) => isEventVisible(e.tag_ids, hidden) && (!hideRoutine || e.source !== 'routine'),
+      ),
+    [eventsQuery.data, hidden, hideRoutine],
+  )
+
   /** Cards grouped by the day they *start*. An event running past midnight belongs
    *  to the day it began, which is the same rule the backend uses to decide whether
    *  a routine day is occupied — a card that appeared in two cells would be counted
    *  twice by eye and read as a duplicate. */
   const eventsByDay = useMemo(() => {
     const map = new Map<string, AveryEvent[]>()
-    for (const event of eventsQuery.data ?? []) {
+    for (const event of visibleEvents) {
       // `start_at` is a naive local `YYYY-MM-DDTHH:MM:SS`, so the date is its prefix.
       // Going through Date here would reintroduce the timezone shift that this
       // format exists to avoid.
@@ -88,7 +121,7 @@ export default function MonthPage() {
     }
     for (const list of map.values()) list.sort((a, b) => a.start_at.localeCompare(b.start_at))
     return map
-  }, [eventsQuery.data])
+  }, [visibleEvents])
 
   const aggregates = useMemo(() => {
     const map = new Map<string, MonthDay>()
@@ -115,95 +148,93 @@ export default function MonthPage() {
   )
 
   return (
-    // Below `lg`, the grid and the day panel stack and the whole column scrolls
-    // together — giving the panel a fixed flex sibling squeezed the grid down to a
-    // sliver whenever the event list was tall. At `lg` and up they sit side by side,
-    // each scrolling independently within the shared height.
-    <div className="flex h-full min-h-0 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
-      <div className="flex flex-col lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
-        <div className="flex items-center gap-3 border-b border-line px-4 py-3">
-          <div className="flex items-center gap-0.5">
-            <button
-              type="button"
-              aria-label="Previous month"
-              className={NAV_BUTTON}
-              onClick={() => setViewMonth((m) => addMonths(m, -1))}
-            >
-              ‹
-            </button>
-            <button
-              type="button"
-              className={NAV_BUTTON}
-              onClick={() => setViewMonth(startOfMonth(new Date()))}
-            >
-              Today
-            </button>
-            <button
-              type="button"
-              aria-label="Next month"
-              className={NAV_BUTTON}
-              onClick={() => setViewMonth((m) => addMonths(m, 1))}
-            >
-              ›
-            </button>
-          </div>
-          <div className="text-sm font-medium text-ink">
-            {MONTH_NAMES[viewMonth.getMonth()]} {viewMonth.getFullYear()}
-          </div>
-          <div className="ml-auto text-xs text-ink-faint">Double-click a card to mark it done</div>
-        </div>
-
-        {(complete.isError || uncomplete.isError) && (
-          <p className="border-b border-line px-4 py-2 text-xs text-ink-faint">
-            Couldn't update that card. It may have been changed elsewhere.
-          </p>
-        )}
-
-        {month.isError && <p className="p-4 text-sm text-ink-faint">Couldn't load this month.</p>}
-        {eventsQuery.isError && !month.isError && (
-          <p className="p-4 text-sm text-ink-faint">Couldn't load this month's cards.</p>
-        )}
-
-        <div className="p-4">
-          <div className="grid grid-cols-7 border-t border-l border-line">
-            {WEEKDAY_LABELS.map((label) => (
-              <div
-                key={label}
-                className="border-r border-b border-line px-2 py-1 text-center text-[11px] uppercase tracking-wide text-ink-faint"
-              >
-                {label}
-              </div>
-            ))}
-
-            {cells.map((cell) => (
-              <DayCell
-                key={cell.date}
-                cell={cell}
-                aggregate={aggregates.get(cell.date)}
-                events={eventsByDay.get(cell.date) ?? []}
-                isToday={cell.date === todayKey}
-                isSelected={cell.date === selected}
-                tagMap={tagMap}
-                taskMap={taskMap}
-                onSelect={() => setSelected(cell.date)}
-                onOpen={onOpen}
-                onToggleComplete={onToggleComplete}
-              />
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {selected && (
-        <DayPanel
-          date={selected}
-          total={selectedDay?.total_minutes ?? 0}
-          eventCount={selectedDay?.event_count ?? 0}
-          tagMap={tagMap}
-          taskMap={taskMap}
-          onClose={() => setSelected(null)}
+    <div className="flex h-full min-h-0">
+      {railOpen && (
+        <CalendarSidebar
+          selectedWeekStart={thisWeekMonday}
+          // A day picked here can't carry the click through to WeekPage without
+          // lifting week state up to App — out of scope for this pass. Landing on
+          // whatever week WeekPage was last showing is a known limitation.
+          onPickDay={() => navigate('/')}
+          ratios={ratios}
+          tags={selectableTags}
+          hidden={hidden}
+          onToggle={toggle}
+          hideRoutine={hideRoutine}
+          onToggleHideRoutine={toggleHideRoutine}
         />
       )}
+
+      {/* Below `lg`, the grid and the day panel stack and the whole column scrolls
+          together — giving the panel a fixed flex sibling squeezed the grid down to a
+          sliver whenever the event list was tall. At `lg` and up they sit side by side,
+          each scrolling independently within the shared height. */}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
+        <div className="flex flex-col lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
+          <CalendarToolbar
+            title={`${MONTH_NAMES[viewMonth.getMonth()]} ${viewMonth.getFullYear()}`}
+            onPrev={() => setViewMonth((m) => addMonths(m, -1))}
+            onNext={() => setViewMonth((m) => addMonths(m, 1))}
+            onToday={() => setViewMonth(startOfMonth(new Date()))}
+          />
+          <div className="border-b border-line px-4 py-1.5 text-right text-xs text-ink-faint">
+            Double-click a card to mark it done
+          </div>
+
+          {(complete.isError || uncomplete.isError) && (
+            <p className="border-b border-line px-4 py-2 text-xs text-ink-faint">
+              Couldn't update that card. It may have been changed elsewhere.
+            </p>
+          )}
+
+          {month.isError && <p className="p-4 text-sm text-ink-faint">Couldn't load this month.</p>}
+          {eventsQuery.isError && !month.isError && (
+            <p className="p-4 text-sm text-ink-faint">Couldn't load this month's cards.</p>
+          )}
+
+          <div className="p-4">
+            <div className="grid grid-cols-7 border-t border-l border-line">
+              {WEEKDAY_LABELS.map((label) => (
+                <div
+                  key={label}
+                  className="border-r border-b border-line px-2 py-1 text-center text-[11px] uppercase tracking-wide text-ink-faint"
+                >
+                  {label}
+                </div>
+              ))}
+
+              {cells.map((cell) => (
+                <DayCell
+                  key={cell.date}
+                  cell={cell}
+                  aggregate={aggregates.get(cell.date)}
+                  events={eventsByDay.get(cell.date) ?? []}
+                  isToday={cell.date === todayKey}
+                  isSelected={cell.date === selected}
+                  tagMap={tagMap}
+                  taskMap={taskMap}
+                  onSelect={() => setSelected(cell.date)}
+                  onOpen={onOpen}
+                  onToggleComplete={onToggleComplete}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {selected && (
+          <DayPanel
+            date={selected}
+            total={selectedDay?.total_minutes ?? 0}
+            eventCount={selectedDay?.event_count ?? 0}
+            tagMap={tagMap}
+            taskMap={taskMap}
+            hidden={hidden}
+            hideRoutine={hideRoutine}
+            onClose={() => setSelected(null)}
+          />
+        )}
+      </div>
 
       <Confetti burst={burst} onDone={clearBurst} />
     </div>
@@ -295,6 +326,8 @@ function DayPanel({
   eventCount,
   tagMap,
   taskMap,
+  hidden,
+  hideRoutine,
   onClose,
 }: {
   date: string
@@ -302,6 +335,8 @@ function DayPanel({
   eventCount: number
   tagMap: ReturnType<typeof useTagMap>
   taskMap: Map<number, Task>
+  hidden: Set<number>
+  hideRoutine: boolean
   onClose: () => void
 }) {
   const dayStart = parseLocal(date)
@@ -313,7 +348,12 @@ function DayPanel({
     queryFn: () => listEvents({ start, end }),
   })
 
-  const events = [...(eventsQuery.data ?? [])].sort((a, b) => a.start_at.localeCompare(b.start_at))
+  // `total`/`eventCount` above come from the server month payload and stay as they
+  // are — see the comment on `visibleEvents` in MonthPage — but the list rendered
+  // below is client-side, so it gets the same filter WeekPage and the grid apply.
+  const events = (eventsQuery.data ?? [])
+    .filter((e) => isEventVisible(e.tag_ids, hidden) && (!hideRoutine || e.source !== 'routine'))
+    .sort((a, b) => a.start_at.localeCompare(b.start_at))
 
   return (
     <aside className="flex w-full shrink-0 flex-col border-t border-line bg-surface p-4 lg:w-80 lg:min-h-0 lg:overflow-y-auto lg:border-t-0 lg:border-l">

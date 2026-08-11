@@ -40,24 +40,5 @@ export function useTagVisibility(selectableIds: number[] | undefined) {
     [hidden],
   )
 
-  // Both of these are one-line, branch-free constructions of a Set — the same shape
-  // toggle's own body already has above, and unlike pruneHidden there is no "empty
-  // means not yet known" subtlety worth pulling into lib/tagVisibility.ts for its own
-  // tests. hideAll's ids come from `selectableIds`, the same set pruneHidden takes;
-  // if that list hasn't loaded yet there is nothing real to hide, so it no-ops rather
-  // than guessing.
-  const hideAll = useCallback(() => {
-    if (selectableIds === undefined) return
-    const next = new Set(selectableIds)
-    writeHiddenTags(window.localStorage, next)
-    setHidden(next)
-  }, [selectableIds])
-
-  const showAll = useCallback(() => {
-    const next = new Set<number>()
-    writeHiddenTags(window.localStorage, next)
-    setHidden(next)
-  }, [])
-
-  return { hidden, toggle, hideAll, showAll }
+  return { hidden, toggle }
 }

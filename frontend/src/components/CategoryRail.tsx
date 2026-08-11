@@ -20,25 +20,19 @@ export function CategoryRail({
   totalMinutes,
   hidden,
   onToggle,
-  onShowAll,
-  onHideAll,
-  selectableKnown,
+  hideRoutine,
+  onToggleHideRoutine,
 }: {
   tags: Tag[]
   minutesByTag: Record<string, number>
   totalMinutes: number
   hidden: Set<number>
   onToggle: (id: number) => void
-  onShowAll: () => void
-  onHideAll: () => void
-  // Whether the caller's selectable-tag list has settled (its tags query resolved) —
-  // NOT `tags.length > 0`. Zero categories is a legitimate settled state and must not
-  // be confused with "not loaded yet," the same distinction useTagVisibility's
-  // `selectableIds` already draws. The per-tag rows below get this for free (an
-  // unsettled list is simply an empty `tags` array, so they don't render). This
-  // control doesn't get that for free — `hideAll` no-ops before the list is known, so
-  // without this gate the button would sit there clickable and silently do nothing.
-  selectableKnown: boolean
+  // Whether events generated from the routine template (`event.source === 'routine'`)
+  // are currently hidden — independent of the per-category checkboxes below, which
+  // only ever affect which tags draw.
+  hideRoutine: boolean
+  onToggleHideRoutine: () => void
 }) {
   const queryClient = useQueryClient()
   const railRef = useRef<HTMLDivElement>(null)
@@ -105,8 +99,6 @@ export function CategoryRail({
     setEditor(null)
   }
 
-  const anyHidden = hidden.size > 0
-
   return (
     <div ref={railRef} className="flex flex-col gap-2">
       <div className="flex items-center justify-between">
@@ -122,22 +114,23 @@ export function CategoryRail({
         </button>
       </div>
 
-      {/* The None/All select-all control this heading used to carry moved here,
-          just below it, rather than vanishing to make room for the +. It was
-          requested two rounds ago and is still in active use, so it keeps its exact
-          behaviour — only its position changed. */}
-      {selectableKnown && tags.length > 0 && (
-        <div className="flex justify-end">
-          <button
-            type="button"
-            className="text-[10px] font-bold uppercase tracking-wide text-ink-faint transition-colors hover:text-ink"
-            onClick={anyHidden ? onShowAll : onHideAll}
-            aria-label={anyHidden ? 'Show all categories' : 'Hide all categories'}
-          >
-            {anyHidden ? 'All' : 'None'}
-          </button>
-        </div>
-      )}
+      {/* Replaces the old None/All select-all control. This hides a different thing
+          entirely — events sourced from the routine template, not a tag — so it's a
+          standalone toggle rather than a modifier on the per-category checkboxes
+          below, which keep their own independent state. */}
+      <button
+        type="button"
+        className="w-full rounded-full px-3 py-1.5 text-xs font-bold uppercase tracking-wide transition-colors"
+        style={
+          hideRoutine
+            ? { background: 'var(--pale)', color: 'var(--ink)' }
+            : { border: '1.5px solid var(--line-strong)', color: 'var(--ink-muted)' }
+        }
+        aria-pressed={hideRoutine}
+        onClick={onToggleHideRoutine}
+      >
+        {hideRoutine ? 'Show routine' : 'Hide routine'}
+      </button>
 
       {tags.map((tag) => {
         const minutes = minutesByTag[String(tag.id)] ?? 0

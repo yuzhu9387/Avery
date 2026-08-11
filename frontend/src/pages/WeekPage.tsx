@@ -3,29 +3,27 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useOutletContext } from 'react-router-dom'
 
 import type { HeaderSlot } from '../App'
-import { ApiError, errorMessage } from '../api/client'
+import { errorMessage } from '../api/client'
 import { invalidateCalendar } from '../api/invalidate'
 import { qk } from '../api/keys'
 import { listTasks } from '../api/tasks'
 import { materializeWeek } from '../api/routines'
 import type { AveryEvent, Task } from '../api/types'
-import { CategoryRail } from '../components/CategoryRail'
+import { CalendarSidebar } from '../components/CalendarSidebar'
+import { CalendarToolbar } from '../components/CalendarToolbar'
 import { Confetti, type Burst } from '../components/Confetti'
-import { MiniMonth } from '../components/MiniMonth'
 import { QuickCreatePopover } from '../components/QuickCreatePopover'
-import { RatioBars } from '../components/RatioBars'
 import { WeekGrid, type SlotClick } from '../components/WeekGrid'
 import { useEventDrag } from '../hooks/useEventDrag'
 import { useEventMutations } from '../hooks/useEventMutations'
 import { useGridZoom } from '../hooks/useGridZoom'
+import { useHideRoutine } from '../hooks/useHideRoutine'
 import { useTagMap, useTags } from '../hooks/useTags'
 import { useTagVisibility } from '../hooks/useTagVisibility'
 import { useWeek, useWeekRatios } from '../hooks/useWeek'
 import { addDays, formatDate, mondayOf } from '../lib/datetime'
 import { minutesToPx } from '../lib/geometry'
 import { isEventVisible } from '../lib/tagVisibility'
-
-const NAV_BUTTON = 'rounded-[8px] px-3 py-1.5 text-sm text-ink-muted transition-colors hover:bg-[var(--pale)]/50 hover:text-ink'
 
 const MONTH_NAMES = [
   'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
@@ -40,30 +38,9 @@ function rangeLabel(monday: Date): string {
 
 export default function WeekPage() {
   const navigate = useNavigate()
-  const { setControls, railOpen } = useOutletContext<HeaderSlot>()
+  const { railOpen } = useOutletContext<HeaderSlot>()
   const [monday, setMonday] = useState(() => mondayOf(new Date()))
   const day = formatDate(monday)
-
-  useEffect(() => {
-    setControls(
-      <div className="flex items-center gap-2">
-        <button
-          type="button"
-          className="rounded-full border border-line px-3 py-1 text-sm font-bold transition-colors hover:bg-[var(--pale)]/50"
-          onClick={() => setMonday(mondayOf(new Date()))}
-        >
-          Today
-        </button>
-        <button type="button" aria-label="Previous week" className={NAV_BUTTON}
-          onClick={() => setMonday((m) => addDays(m, -7))}>‹</button>
-        <button type="button" aria-label="Next week" className={NAV_BUTTON}
-          onClick={() => setMonday((m) => addDays(m, 7))}>›</button>
-        <span className="text-lg font-bold">{rangeLabel(monday)}</span>
-      </div>,
-    )
-    // Leaving the page must not leave stale controls in a shared header.
-    return () => setControls(null)
-  }, [monday, setControls])
 
   const week = useWeek(monday)
   // Gated on `week` resolving first — see the comment on `useWeekRatios` for why
@@ -79,7 +56,8 @@ export default function WeekPage() {
     () => (tags.isSuccess ? selectableTags.map((t) => t.id) : undefined),
     [tags.isSuccess, selectableTags],
   )
-  const { hidden, toggle, hideAll, showAll } = useTagVisibility(selectableTagIds)
+  const { hidden, toggle } = useTagVisibility(selectableTagIds)
+  const { hideRoutine, toggle: toggleHideRoutine } = useHideRoutine()
   const { create, complete, uncomplete } = useEventMutations()
   const [slot, setSlot] = useState<SlotClick | null>(null)
 
@@ -150,52 +128,38 @@ export default function WeekPage() {
 
   const events = week.data?.events ?? []
   const visibleEvents = useMemo(
-    () => events.filter((e) => isEventVisible(e.tag_ids, hidden)),
-    [events, hidden],
+    () =>
+      events.filter(
+        (e) => isEventVisible(e.tag_ids, hidden) && (!hideRoutine || e.source !== 'routine'),
+      ),
+    [events, hidden, hideRoutine],
   )
   const isPastWeek = monday.getTime() < mondayOf(new Date()).getTime()
   const isEmptyPastWeek = isPastWeek && week.isSuccess && events.length === 0
 
-  const noActiveRule = ratios.error instanceof ApiError && ratios.error.status === 409
-
   return (
     <div className="flex h-full min-h-0">
       {railOpen && (
-        <aside className="w-56 shrink-0 overflow-y-auto border-r border-line bg-surface p-4">
-          <MiniMonth selectedWeekStart={monday} onPick={(day) => setMonday(mondayOf(day))} />
-
-          <h2 className="mb-3 mt-4 text-xs font-medium uppercase tracking-wide text-ink-faint">
-            This week
-          </h2>
-          {ratios.isLoading && <p className="text-xs text-ink-faint">Checking your rule…</p>}
-          {noActiveRule && (
-            <p className="text-xs text-ink-faint">
-              No active rule yet — set one on the Rules page to see this week against it.
-            </p>
-          )}
-          {!noActiveRule && ratios.isError && (
-            <p className="text-xs text-ink-faint">Couldn't load this week's ratios.</p>
-          )}
-          {ratios.data && (
-            <RatioBars groups={ratios.data.metrics.groups} tolerance={ratios.data.rule.tolerance} compact />
-          )}
-
-          <div className="mt-6">
-            <CategoryRail
-              tags={selectableTags}
-              minutesByTag={ratios.data?.metrics.minutes_by_primary_tag ?? {}}
-              totalMinutes={ratios.data?.metrics.total_minutes ?? 0}
-              hidden={hidden}
-              onToggle={toggle}
-              onShowAll={showAll}
-              onHideAll={hideAll}
-              selectableKnown={tags.isSuccess}
-            />
-          </div>
-        </aside>
+        <CalendarSidebar
+          selectedWeekStart={monday}
+          onPickDay={(day) => setMonday(mondayOf(day))}
+          ratios={ratios}
+          tags={selectableTags}
+          hidden={hidden}
+          onToggle={toggle}
+          hideRoutine={hideRoutine}
+          onToggleHideRoutine={toggleHideRoutine}
+        />
       )}
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <CalendarToolbar
+          title={rangeLabel(monday)}
+          onPrev={() => setMonday((m) => addDays(m, -7))}
+          onNext={() => setMonday((m) => addDays(m, 7))}
+          onToday={() => setMonday(mondayOf(new Date()))}
+        />
+
         {week.data?.materialized && (
           <div className="border-b border-line px-4 py-1.5 text-xs text-ink-faint">
             Generated from your routine
