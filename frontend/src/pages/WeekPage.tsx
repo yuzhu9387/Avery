@@ -189,6 +189,7 @@ export default function WeekPage() {
               onToggle={toggle}
               onShowAll={showAll}
               onHideAll={hideAll}
+              selectableKnown={tags.isSuccess}
             />
           </div>
         </aside>
