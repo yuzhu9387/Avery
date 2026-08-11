@@ -169,7 +169,7 @@ export default function WeekPage() {
               events={events}
               tagMap={tagMap}
               taskMap={taskMap}
-              onEventPointerDownMove={onPointerDownMove}
+              onEventPointerDown={onPointerDownMove}
               onEventPointerDownResize={onPointerDownResize}
               draft={draft}
               scrollRef={setGridEl}

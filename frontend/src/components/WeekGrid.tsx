@@ -10,7 +10,7 @@ import {
   segmentsForEvent,
   type Segment,
 } from '../lib/geometry'
-import { EventBlock } from './EventBlock'
+import { EventCard } from './EventCard'
 
 const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 const GUTTER_PX = 56
@@ -29,8 +29,10 @@ export function WeekGrid({
   events,
   tagMap,
   taskMap,
-  onEventPointerDownMove,
-  onEventPointerDownResize,
+  onEventPointerDown,
+  // Not yet rendered — Task 11 re-attaches resize handles as siblings of EventCard
+  // and wires this through. Kept in the props type so callers can pass it now.
+  onEventPointerDownResize: _onEventPointerDownResize,
   draft,
   pxPerHour,
   columnPx,
@@ -40,7 +42,7 @@ export function WeekGrid({
   events: AveryEvent[]
   tagMap: Map<number, Tag>
   taskMap: Map<number, Task>
-  onEventPointerDownMove?: (event: AveryEvent, segment: Segment) => (e: React.PointerEvent) => void
+  onEventPointerDown?: (event: AveryEvent, segment: Segment) => (e: React.PointerEvent) => void
   onEventPointerDownResize?: (
     event: AveryEvent,
     segment: Segment,
@@ -99,7 +101,7 @@ export function WeekGrid({
       >
         {/* corner: sticky on both axes so it covers the gutter under the header.
             z-index stack (back to front): resting cards/gridlines (auto/0) < now-line
-            (10) < a dragging EventBlock (20, set in EventBlock.tsx) < gutter (30) <
+            (10) < a dragging EventCard (20, set in EventCard.tsx) < gutter (30) <
             day headers (40) < this corner (50). The day-column divs have no z-index of
             their own, so a dragging card's z-20 is compared directly against these
             sticky siblings in the same stacking context — it must stay under all
@@ -199,14 +201,13 @@ export function WeekGrid({
                 }
 
                 return (
-                  <EventBlock
+                  <EventCard
                     key={`${event.id}-${segment.dayIndex}`}
                     event={event}
                     segment={renderSegment}
                     tag={tagMap.get(event.tag_ids[0])}
                     title={taskMap.get(event.task_id)?.name ?? `Task #${event.task_id}`}
-                    onPointerDownMove={onEventPointerDownMove?.(event, segment)}
-                    onPointerDownResize={onEventPointerDownResize?.(event, segment)}
+                    onPointerDown={onEventPointerDown?.(event, segment)}
                     isDragging={isDragging}
                     dragOffset={dragOffset}
                   />
