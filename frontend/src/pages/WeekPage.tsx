@@ -9,12 +9,13 @@ import { listTasks } from '../api/tasks'
 import { materializeWeek } from '../api/templates'
 import type { AveryEvent, Task } from '../api/types'
 import { Confetti, type Burst } from '../components/Confetti'
+import { QuickCreatePopover } from '../components/QuickCreatePopover'
 import { RatioBars } from '../components/RatioBars'
-import { WeekGrid } from '../components/WeekGrid'
+import { WeekGrid, type SlotClick } from '../components/WeekGrid'
 import { useEventDrag } from '../hooks/useEventDrag'
 import { useEventMutations } from '../hooks/useEventMutations'
 import { useGridZoom } from '../hooks/useGridZoom'
-import { useTagMap } from '../hooks/useTags'
+import { useTagMap, useTags } from '../hooks/useTags'
 import { useWeek, useWeekRatios } from '../hooks/useWeek'
 import { addDays, formatDate, mondayOf } from '../lib/datetime'
 import { minutesToPx } from '../lib/geometry'
@@ -42,7 +43,9 @@ export default function WeekPage() {
   // firing this in parallel can cache a false "0 minutes" snapshot.
   const ratios = useWeekRatios(monday, week.isSuccess)
   const tagMap = useTagMap()
-  const { complete, uncomplete } = useEventMutations()
+  const tags = useTags()
+  const { create, complete, uncomplete } = useEventMutations()
+  const [slot, setSlot] = useState<SlotClick | null>(null)
 
   // A callback ref (via state) rather than a plain useRef: the grid only mounts once
   // `week.isSuccess` (see the conditional render below), so on a cold load a plain
@@ -201,6 +204,7 @@ export default function WeekPage() {
               onToggleComplete={onToggleComplete}
               onDragStart={beginMove}
               onEventPointerDownResize={onPointerDownResize}
+              onEmptyClick={setSlot}
               draft={draft}
               scrollRef={setGridEl}
               pxPerHour={pxPerHour}
@@ -209,6 +213,23 @@ export default function WeekPage() {
           )}
         </div>
       </div>
+      {slot && (
+        <QuickCreatePopover
+          slot={slot}
+          tags={tags.data ?? []}
+          isPending={create.isPending}
+          error={create.error instanceof ApiError ? create.error.detail : null}
+          onClose={() => {
+            setSlot(null)
+            create.reset()
+          }}
+          onSave={(draft) =>
+            create.mutate(draft, {
+              onSuccess: () => setSlot(null),
+            })
+          }
+        />
+      )}
       <Confetti burst={burst} onDone={clearBurst} />
     </div>
   )

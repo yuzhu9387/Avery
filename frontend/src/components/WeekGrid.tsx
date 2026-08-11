@@ -11,13 +11,23 @@ import {
   gridHeightPx,
   hourMarks,
   minutesToPx,
+  pxToMinutes,
   segmentsForEvent,
+  snapMinutes,
   type Segment,
 } from '../lib/geometry'
 import { CARD_RIGHT_GUTTER_PX, EventCard } from './EventCard'
 
 const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 const GUTTER_PX = 56
+
+export interface SlotClick {
+  day: Date
+  /** Minutes from midnight, snapped to the grid's 15-minute slots. */
+  minutes: number
+  x: number
+  y: number
+}
 
 /** One card plus its resize handles. A real component, not a function called in a
  *  loop — `useCardGestures` is a hook, and hooks cannot be called inside `map`. */
@@ -67,7 +77,7 @@ function GridCard({
   })
 
   return (
-    <div className="contents">
+    <div className="contents" onPointerDown={(e) => e.stopPropagation()}>
       <EventCard
         event={event}
         segment={segment}
@@ -123,6 +133,7 @@ export function WeekGrid({
   onToggleComplete,
   onDragStart,
   onEventPointerDownResize,
+  onEmptyClick,
   draft,
   pxPerHour,
   columnPx,
@@ -142,6 +153,9 @@ export function WeekGrid({
   onEventPointerDownResize?: (
     event: AveryEvent,
   ) => (e: React.PointerEvent, edge: 'start' | 'end') => void
+  /** A press that reached the empty column — including the gutter strip every card
+   *  leaves free down its right side — rather than a card or resize handle. */
+  onEmptyClick?: (slot: SlotClick) => void
   /** The event mid-drag, if any, and its live pixel offset. */
   draft?: DragDraft | null
   /** Pixels per hour at the current zoom. */
@@ -252,6 +266,19 @@ export function WeekGrid({
               key={dayIndex}
               className="relative border-l border-line"
               style={{ height: heightPx }}
+              onPointerDown={(e) => {
+                // Cards and resize handles stop propagation, so reaching here means
+                // the press landed on empty column — including the gutter strip that
+                // every card deliberately leaves free down its right-hand side.
+                if (!onEmptyClick) return
+                const rect = e.currentTarget.getBoundingClientRect()
+                onEmptyClick({
+                  day: days[dayIndex],
+                  minutes: snapMinutes(pxToMinutes(e.clientY - rect.top, pxPerHour)),
+                  x: e.clientX,
+                  y: e.clientY,
+                })
+              }}
             >
               {isToday && (
                 <div
