@@ -18,6 +18,8 @@ export const createRoutine = (body: NewRoutine) => apiSend<Routine>('POST', '/ro
 export const updateRoutine = (id: number, body: Partial<Routine>) =>
   apiSend<Routine>('PATCH', `/routines/${id}`, body)
 
+export const deleteRoutine = (id: number) => apiSend<void>('DELETE', `/routines/${id}`)
+
 export const createBlock = (routineId: number, body: Partial<RoutineBlock>) =>
   apiSend<RoutineBlock>('POST', `/routines/${routineId}/blocks`, body)
 

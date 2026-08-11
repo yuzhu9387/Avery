@@ -6,6 +6,7 @@ import {
   createBlock,
   createRoutine,
   deleteBlock,
+  deleteRoutine,
   getActiveRoutine,
   listRoutines,
   previewWeek,
@@ -165,6 +166,18 @@ export function useDeleteBlock() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (id: number) => deleteBlock(id),
+    onSuccess: () => invalidateRoutineEffects(queryClient),
+  })
+}
+
+/** Deletes a whole version. The backend refuses this for the active version
+ *  (409) — activate another one first — so callers only ever reach here for a
+ *  retired version, and the full sweep still applies since the version list
+ *  itself has to drop the deleted row. */
+export function useDeleteRoutine() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: number) => deleteRoutine(id),
     onSuccess: () => invalidateRoutineEffects(queryClient),
   })
 }

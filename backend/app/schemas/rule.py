@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class RuleGroup(BaseModel):
@@ -39,6 +39,31 @@ class RuleCreate(BaseModel):
                 "excluded tags leave the ratio entirely"
             )
         return self
+
+
+class RuleUpdate(BaseModel):
+    """Cosmetic-only patch: name and note (the UI's "description").
+
+    Deliberately excludes `groups`, `tolerance`, and `exclude_tag_ids` — a rule
+    version's ratios are immutable by design (`create_rule_version` supersedes,
+    never edits, and a stored Report snapshots the rule it was measured
+    against). `extra="forbid"` makes that a 422 at the boundary rather than a
+    silently-ignored field, so a client that tries to sneak a ratio change in
+    finds out immediately instead of believing it worked.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    # A description may legitimately be cleared, so "" is allowed where a name is not.
+    note: str | None = None
+
+    @field_validator("name", "note")
+    @classmethod
+    def reject_explicit_null(cls, value):
+        if value is None:
+            raise ValueError("field cannot be set to null")
+        return value
 
 
 class RuleOut(BaseModel):

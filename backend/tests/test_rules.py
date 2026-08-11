@@ -46,11 +46,41 @@ async def test_new_version_closes_previous(client):
     assert active.json()["id"] == second.json()["id"]
 
 
-async def test_rules_are_never_mutated_in_place(client):
+async def test_rule_ratios_and_groups_are_never_mutated_in_place(client):
+    """A version's ratios/groups are immutable — a new commitment is a new version,
+    never an edit to this one — because a stored Report snapshots the rule it was
+    measured against, and rewriting the ratios here would silently rewrite history
+    those Reports already rendered. PATCH exists (below), but only for the cosmetic
+    fields (name/note); anything that would touch the ratio math is a 422."""
     await _seed_tags(client)
-    await client.post("/api/rules", json=RULE_BODY)
-    # There is deliberately no PATCH route on rules.
-    assert (await client.patch("/api/rules/1", json={"tolerance": 0.9})).status_code == 405
+    rule_id = (await client.post("/api/rules", json=RULE_BODY)).json()["id"]
+    assert (await client.patch(f"/api/rules/{rule_id}", json={"tolerance": 0.9})).status_code == 422
+    assert (
+        await client.patch(f"/api/rules/{rule_id}", json={"groups": RULE_BODY["groups"]})
+    ).status_code == 422
+
+
+async def test_patch_renames_and_re_annotates_a_rule_version(client):
+    await _seed_tags(client)
+    rule_id = (await client.post("/api/rules", json=RULE_BODY)).json()["id"]
+
+    renamed = await client.patch(
+        f"/api/rules/{rule_id}", json={"name": "Renamed", "note": "why this changed"}
+    )
+    assert renamed.status_code == 200
+    assert renamed.json()["name"] == "Renamed"
+    assert renamed.json()["note"] == "why this changed"
+    # Ratios/groups are untouched by a cosmetic patch.
+    assert renamed.json()["groups"] == RULE_BODY["groups"]
+
+    # A note/description may legitimately be cleared; a name may not.
+    cleared = await client.patch(f"/api/rules/{rule_id}", json={"note": ""})
+    assert cleared.json()["note"] == ""
+    assert (await client.patch(f"/api/rules/{rule_id}", json={"name": ""})).status_code == 422
+
+
+async def test_patch_unknown_rule_is_404(client):
+    assert (await client.patch("/api/rules/9999", json={"name": "X"})).status_code == 404
 
 
 async def test_ratios_must_be_positive(client):

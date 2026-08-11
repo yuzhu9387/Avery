@@ -4,6 +4,7 @@ import { ApiError } from '../api/client'
 import type { Routine, RoutineBlock, Tag } from '../api/types'
 import { BlockForm } from '../components/BlockForm'
 import { Modal } from '../components/Modal'
+import { VersionDeleteButton } from '../components/VersionDeleteButton'
 import type { ColumnKey } from '../hooks/useRoutine'
 import {
   classifyDays,
@@ -11,6 +12,7 @@ import {
   useCreateBlock,
   useCreateRoutine,
   useDeleteBlock,
+  useDeleteRoutine,
   useRoutines,
   useUpdateBlock,
   useUpdateRoutine,
@@ -80,9 +82,15 @@ export default function RoutinePage() {
   const createBlock = useCreateBlock()
   const updateBlock = useUpdateBlock()
   const deleteBlock = useDeleteBlock()
+  const deleteRoutine = useDeleteRoutine()
 
   const [modal, setModal] = useState<ModalState | null>(null)
   const [selectedId, setSelectedId] = useState<number | null>(null)
+  // Which version's delete is armed ("×" already clicked once, next click confirms)
+  // and the error from the version whose delete most recently failed (the 409 for
+  // trying to delete the active version, surfaced right on that card).
+  const [armedDeleteId, setArmedDeleteId] = useState<number | null>(null)
+  const [deleteError, setDeleteError] = useState<{ id: number; message: string } | null>(null)
 
   const versions = versionsQuery.data ?? []
   const active = versions.find((v) => v.is_active) ?? null
@@ -133,6 +141,18 @@ export default function RoutinePage() {
 
   const formError = (mutation: typeof createBlock | typeof updateBlock) =>
     mutation.error instanceof ApiError ? mutation.error.detail : null
+
+  const handleDeleteVersion = (id: number) => {
+    setDeleteError(null)
+    deleteRoutine.mutate(id, {
+      onSuccess: () => setArmedDeleteId(null),
+      onError: (err) => {
+        setArmedDeleteId(null)
+        const message = err instanceof ApiError ? err.detail : 'Could not delete this version.'
+        setDeleteError({ id, message })
+      },
+    })
+  }
 
   if (versionsQuery.isLoading) {
     return <p className="p-5 text-sm text-ink-faint">Loading routine…</p>
@@ -209,10 +229,18 @@ export default function RoutinePage() {
               key={version.id}
               version={version}
               isShowing={selected?.id === version.id}
+              deleteArmed={armedDeleteId === version.id}
+              deleting={deleteRoutine.isPending && deleteRoutine.variables === version.id}
+              deleteError={deleteError?.id === version.id ? deleteError.message : null}
               onSelect={() => setSelectedId(version.id)}
               onRename={(name) => updateRoutine.mutate({ id: version.id, body: { name } })}
               onNote={(note) => updateRoutine.mutate({ id: version.id, body: { note } })}
               onActivate={() => updateRoutine.mutate({ id: version.id, body: { is_active: true } })}
+              onArmDelete={() => {
+                setDeleteError(null)
+                setArmedDeleteId(version.id)
+              }}
+              onConfirmDelete={() => handleDeleteVersion(version.id)}
             />
           ))}
         </ul>
@@ -424,6 +452,14 @@ function GroupRow({
   )
 }
 
+/**
+ * One block, big enough to read at a glance without hovering: the time range,
+ * the task name, and its primary category (swatch + name) are all on the card
+ * itself rather than behind a tooltip. `title` still carries the day set for a
+ * Custom block and the midnight-wrap note — both already spelled out by the
+ * row's own label or the crossing itself, so they stay a hover detail rather
+ * than fighting the card for space.
+ */
 function BlockPill({
   block,
   tagMap,
@@ -438,39 +474,33 @@ function BlockPill({
   const crossesMidnight = block.end_time <= block.start_time
   const custom = classifyDays(block.days) === 'custom'
   const tag = tagMap.get(block.tag_ids[0])
-  const detail = [
-    `${block.start_time.slice(0, 5)}–${block.end_time.slice(0, 5)}`,
-    block.task_name,
-    custom ? formatDaySet(block.days) : null,
-    crossesMidnight ? 'crosses midnight' : null,
-  ]
+  const detail = [custom ? formatDaySet(block.days) : null, crossesMidnight ? 'crosses midnight' : null]
     .filter(Boolean)
     .join(' · ')
 
   return (
     <span
-      className="group flex max-w-full items-center gap-1.5 rounded-[7px] border border-line py-1 pl-1.5 pr-1"
+      className="group relative flex w-[164px] max-w-full shrink-0 flex-col gap-1 rounded-[10px] border border-line p-2 pr-5"
       style={{ background: 'var(--surface-raised)' }}
     >
-      <span
-        aria-hidden
-        className="h-1.5 w-1.5 shrink-0 rounded-full"
-        style={{ background: tag?.color ?? 'var(--line-strong)' }}
-      />
-      {/* The whole pill is the edit target; `title` carries everything that had to be
-       *  dropped to fit — day set, midnight wrap, and the full name when truncated. */}
-      <button
-        type="button"
-        onClick={onEdit}
-        title={detail}
-        className="flex min-w-0 items-baseline gap-1.5 text-left"
-      >
-        <span className="shrink-0 text-[10px] tabular-nums leading-none text-ink-faint">
-          {block.start_time.slice(0, 5)}
+      <button type="button" onClick={onEdit} title={detail || undefined} className="flex min-w-0 flex-col gap-1 text-left">
+        <span className="text-[11px] tabular-nums leading-none text-ink-faint">
+          {block.start_time.slice(0, 5)}–{block.end_time.slice(0, 5)}
         </span>
-        <span className="max-w-[132px] truncate text-[11.5px] leading-none text-ink">
-          {block.task_name}
+        <span className="truncate text-[13px] font-medium leading-tight text-ink">{block.task_name}</span>
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span
+            aria-hidden
+            className="h-1.5 w-1.5 shrink-0 rounded-full"
+            style={{ background: tag?.color ?? 'var(--line-strong)' }}
+          />
+          <span className="truncate text-[11px] leading-none text-ink-muted">
+            {tag?.name ?? 'Uncategorized'}
+          </span>
         </span>
+        {custom && (
+          <span className="truncate text-[10px] leading-none text-ink-faint">{formatDaySet(block.days)}</span>
+        )}
       </button>
       <button
         type="button"
@@ -478,7 +508,7 @@ function BlockPill({
         onClick={onDelete}
         // Always occupies its space so nothing shifts on hover; only the colour comes
         // up. Hiding it outright would put delete out of reach on touch.
-        className="shrink-0 rounded-[4px] px-1 text-[11px] leading-none opacity-45 transition-opacity hover:opacity-100 group-hover:opacity-80"
+        className="absolute right-1 top-1 shrink-0 rounded-[4px] px-1 text-[12px] leading-none opacity-45 transition-opacity hover:opacity-100 group-hover:opacity-80"
         style={{ color: 'var(--over)' }}
       >
         ×
@@ -490,17 +520,27 @@ function BlockPill({
 function VersionRow({
   version,
   isShowing,
+  deleteArmed,
+  deleting,
+  deleteError,
   onSelect,
   onRename,
   onNote,
   onActivate,
+  onArmDelete,
+  onConfirmDelete,
 }: {
   version: Routine
   isShowing: boolean
+  deleteArmed: boolean
+  deleting: boolean
+  deleteError: string | null
   onSelect: () => void
   onRename: (name: string) => void
   onNote: (note: string) => void
   onActivate: () => void
+  onArmDelete: () => void
+  onConfirmDelete: () => void
 }) {
   // Local drafts so typing does not fire a mutation per keystroke; committed on blur,
   // and only when the value actually changed.
@@ -511,78 +551,104 @@ function VersionRow({
 
   return (
     <li
+      // The whole card is the click target now (item 6) — there is no separate
+      // Show/Showing button. A real `<button>` can't hold this card's own inline-
+      // editable name/note `<input>`s and its Activate/delete controls (interactive
+      // content isn't valid inside a `<button>`), so this is the role/keyboard
+      // equivalent instead: `role="button"` + `tabIndex` + Enter/Space, with
+      // `aria-pressed` carrying which version is on screen.
+      role="button"
+      tabIndex={0}
+      aria-pressed={isShowing}
+      aria-label={`Show ${version.name} on screen`}
+      onClick={onSelect}
+      onKeyDown={(e) => {
+        // Only when the key lands on the card itself — a nested input or button
+        // handles its own Enter/Space, and re-triggering onSelect from there would
+        // fire it a second time (harmlessly, but pointlessly) on every keystroke.
+        if (e.target !== e.currentTarget) return
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onSelect()
+        }
+      }}
       // Showing and active are different things and have to look different: one is
       // what you are watching, the other is what fills in your weeks. The left bar
       // marks the former, the pill marks the latter, and a version can be either,
       // both, or neither.
-      className="flex items-center gap-2 border-b border-line py-2 pl-2 pr-2.5 last:border-b-0"
+      className="flex cursor-pointer flex-col gap-1 border-b border-line py-2 pl-2 pr-2.5 outline-none last:border-b-0 focus-visible:ring-2 focus-visible:ring-inset"
       style={{
         background: isShowing ? 'var(--pale)' : undefined,
         boxShadow: isShowing ? 'inset 3px 0 0 0 var(--sage)' : undefined,
       }}
     >
-      <button
-        type="button"
-        onClick={onSelect}
-        aria-label={`Show ${version.name} on screen`}
-        aria-pressed={isShowing}
-        className="w-14 shrink-0 rounded-[6px] px-1 py-1 text-[11px] text-ink-muted transition-colors hover:bg-[var(--surface-raised)] hover:text-ink"
-      >
-        {isShowing ? 'Showing' : 'Show'}
-      </button>
-
-      <div className="min-w-0 flex-1">
-        <input
-          value={name ?? version.name}
-          onChange={(e) => setName(e.target.value)}
-          onBlur={() => {
-            const next = (name ?? '').trim()
-            if (name !== null && next && next !== version.name) onRename(next)
-            setName(null)
-          }}
-          aria-label={`Name of version ${version.id}`}
-          className="w-full truncate border-none bg-transparent text-[13px] font-medium leading-tight text-ink outline-none focus:ring-0"
-        />
-        <input
-          value={note ?? version.note}
-          onChange={(e) => setNote(e.target.value)}
-          onBlur={() => {
-            const next = (note ?? '').trim()
-            if (note !== null && next !== version.note) onNote(next)
-            setNote(null)
-          }}
-          placeholder="Add a note"
-          aria-label={`Note on version ${version.id}`}
-          className="w-full truncate border-none bg-transparent text-[11px] leading-tight text-ink-muted outline-none focus:ring-0"
-        />
-      </div>
-
-      <div className="w-[104px] shrink-0 text-right text-[10px] leading-tight text-ink-faint">
-        <div>
-          {version.blocks.length} block{version.blocks.length === 1 ? '' : 's'} ·{' '}
-          {formatMinutes(totalMinutes)}
+      <div className="flex items-center gap-2">
+        <div className="min-w-0 flex-1">
+          <input
+            value={name ?? version.name}
+            onChange={(e) => setName(e.target.value)}
+            onClick={(e) => e.stopPropagation()}
+            onBlur={() => {
+              const next = (name ?? '').trim()
+              if (name !== null && next && next !== version.name) onRename(next)
+              setName(null)
+            }}
+            aria-label={`Name of version ${version.id}`}
+            className="w-full truncate border-none bg-transparent text-[13px] font-medium leading-tight text-ink outline-none focus:ring-0"
+          />
+          <input
+            value={note ?? version.note}
+            onChange={(e) => setNote(e.target.value)}
+            onClick={(e) => e.stopPropagation()}
+            onBlur={() => {
+              const next = (note ?? '').trim()
+              if (note !== null && next !== version.note) onNote(next)
+              setNote(null)
+            }}
+            placeholder="Add a note"
+            aria-label={`Note on version ${version.id}`}
+            className="w-full truncate border-none bg-transparent text-[11px] leading-tight text-ink-muted outline-none focus:ring-0"
+          />
         </div>
-        <div>{formatUpdated(version.updated_at)}</div>
-      </div>
 
-      <div className="w-[60px] shrink-0 text-right">
-        {version.is_active ? (
-          <span
-            className="rounded-full px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-ink"
-            style={{ background: 'var(--surface-raised)' }}
-          >
-            Active
-          </span>
-        ) : (
-          <button
-            type="button"
-            onClick={onActivate}
-            className="rounded-[6px] px-1.5 py-1 text-[11px] text-ink-muted transition-colors hover:bg-[var(--surface-raised)] hover:text-ink"
-          >
-            Activate
-          </button>
-        )}
+        <div className="w-[104px] shrink-0 text-right text-[10px] leading-tight text-ink-faint">
+          <div>
+            {version.blocks.length} block{version.blocks.length === 1 ? '' : 's'} ·{' '}
+            {formatMinutes(totalMinutes)}
+          </div>
+          <div>{formatUpdated(version.updated_at)}</div>
+        </div>
+
+        <div className="flex shrink-0 items-center gap-1">
+          {version.is_active ? (
+            <span
+              className="rounded-full px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-ink"
+              style={{ background: 'var(--surface-raised)' }}
+            >
+              Active
+            </span>
+          ) : (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                onActivate()
+              }}
+              className="rounded-[6px] px-1.5 py-1 text-[11px] text-ink-muted transition-colors hover:bg-[var(--surface-raised)] hover:text-ink"
+            >
+              Activate
+            </button>
+          )}
+          <VersionDeleteButton
+            armed={deleteArmed}
+            pending={deleting}
+            label={version.name}
+            onArm={onArmDelete}
+            onConfirm={onConfirmDelete}
+          />
+        </div>
       </div>
+      {deleteError && <p className="text-[10px] text-[var(--over)]">{deleteError}</p>}
     </li>
   )
 }

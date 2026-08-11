@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { QueryClient } from '@tanstack/react-query'
 
 import { ApiError } from '../api/client'
-import { createRuleVersion, deleteRule, getActiveRule, listRules } from '../api/rules'
+import { createRuleVersion, deleteRule, getActiveRule, listRules, updateRule } from '../api/rules'
 import { qk } from '../api/keys'
 import type { Rule } from '../api/types'
 
@@ -45,6 +45,19 @@ export function useDeleteRule() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (id: number) => deleteRule(id),
+    onSuccess: () => invalidateRuleEffects(queryClient),
+  })
+}
+
+/** Cosmetic-only: renames or re-annotates a version in place — ratios/groups are
+ *  immutable (see `RuleUpdate` on the backend), so this never needs the ratio/band
+ *  math to be recomputed, but the version list and the active-rule card both read
+ *  the name/note and have to drop their stale copy. */
+export function useUpdateRule() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, body }: { id: number; body: { name?: string; note?: string } }) =>
+      updateRule(id, body),
     onSuccess: () => invalidateRuleEffects(queryClient),
   })
 }

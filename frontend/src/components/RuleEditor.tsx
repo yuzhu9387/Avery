@@ -37,7 +37,7 @@ function ownerMap(groups: RuleGroup[], excludeTagIds: number[]): Map<number, Own
  * (`key={rule.id}`) once that happens, so a freshly created version starts its own,
  * unedited draft rather than inheriting stale local state.
  */
-export function RuleEditor({ rule }: { rule: Rule }) {
+export function RuleEditor({ rule, onSaved }: { rule: Rule; onSaved?: () => void }) {
   const tagsQuery = useTags()
   const tagMap = useTagMap()
   const tags = tagsQuery.data ?? []
@@ -108,7 +108,12 @@ export function RuleEditor({ rule }: { rule: Rule }) {
         exclude_tag_ids: excludeTagIds,
         note: note.trim(),
       },
-      { onSuccess: closeSaveModal },
+      {
+        onSuccess: () => {
+          closeSaveModal()
+          onSaved?.()
+        },
+      },
     )
   }
 

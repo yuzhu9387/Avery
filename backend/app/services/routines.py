@@ -21,6 +21,16 @@ class NoActiveRoutine(Exception):
     """Raised when materialization is requested but no active routine exists."""
 
 
+class ActiveRoutineError(Exception):
+    """Raised when deleting the currently active routine version is attempted.
+
+    Deleting it would leave nothing generating future weeks with no warning —
+    the same silent-empty-week failure `_deactivate_others` exists to prevent
+    on the create/activate side. The fix is the same: activate another version
+    first, then delete this one.
+    """
+
+
 def week_bounds(any_day: date) -> tuple[date, date]:
     """Monday and the following Monday for the week containing `any_day`."""
     monday = any_day - timedelta(days=any_day.isoweekday() - 1)
@@ -151,6 +161,8 @@ async def delete_routine(session: AsyncSession, routine_id: int) -> bool:
     routine = await session.get(Routine, routine_id)
     if routine is None:
         return False
+    if routine.is_active:
+        raise ActiveRoutineError(routine_id)
     await session.delete(routine)
     await session.commit()
     return True

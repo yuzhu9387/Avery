@@ -461,6 +461,34 @@ async def test_switching_the_active_version_does_not_rewrite_either_timestamp(cl
     assert after[new] == before[new], "retiring a version must not restamp it"
 
 
+async def test_deleting_the_active_version_is_refused(client):
+    """Deleting the active version would leave nothing generating future weeks,
+    silently — the same failure mode `_deactivate_others` guards against on the
+    create/activate side. The fix is the same: activate something else first."""
+    routine_id = await _routine(client, [WEEKDAY_BLOCK])
+    resp = await client.delete(f"/api/routines/{routine_id}")
+    assert resp.status_code == 409
+    assert "activate another" in resp.json()["detail"]
+    # Refused, not silently no-op'd: the version and its block are still there.
+    assert (await client.get(f"/api/routines/{routine_id}")).status_code == 200
+
+
+async def test_deleting_an_inactive_version_removes_it_and_its_blocks(client):
+    old = await _routine(client, [WEEKDAY_BLOCK])
+    await client.post("/api/routines", json={"name": "Second"})  # retires `old`
+
+    resp = await client.delete(f"/api/routines/{old}")
+    assert resp.status_code == 204
+    assert (await client.get(f"/api/routines/{old}")).status_code == 404
+
+    listed = [r["id"] for r in (await client.get("/api/routines")).json()]
+    assert old not in listed
+
+
+async def test_delete_unknown_routine_is_404(client):
+    assert (await client.delete("/api/routines/9999")).status_code == 404
+
+
 async def test_renaming_or_annotating_a_version_does_move_its_timestamp(client):
     routine_id = (await client.post("/api/routines", json={"name": "One"})).json()["id"]
     created = (await client.get(f"/api/routines/{routine_id}")).json()["updated_at"]

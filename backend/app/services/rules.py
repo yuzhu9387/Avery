@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Report, Rule
-from app.schemas.rule import RuleCreate
+from app.schemas.rule import RuleCreate, RuleUpdate
 from app.services.tags import assert_tags_exist
 
 
@@ -86,6 +86,21 @@ async def create_rule_version(session: AsyncSession, data: RuleCreate) -> Rule:
         note=data.note,
     )
     session.add(rule)
+    await session.commit()
+    await session.refresh(rule)
+    return rule
+
+
+async def update_rule(session: AsyncSession, rule_id: int, data: RuleUpdate) -> Rule | None:
+    """Cosmetic-only: renames or re-annotates a version in place. Ratios/groups
+    stay immutable — `RuleUpdate` never carries them, so there is nothing here
+    that could disagree with a Report's snapshotted copy of this rule."""
+    rule = await session.get(Rule, rule_id)
+    if rule is None:
+        return None
+    fields = data.model_dump(exclude_unset=True)
+    for key, value in fields.items():
+        setattr(rule, key, value)
     await session.commit()
     await session.refresh(rule)
     return rule

@@ -78,7 +78,14 @@ async def update_routine(
 
 @router.delete("/{routine_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_routine(routine_id: int, session: AsyncSession = Depends(get_session)):
-    if not await service.delete_routine(session, routine_id):
+    try:
+        deleted = await service.delete_routine(session, routine_id)
+    except service.ActiveRoutineError:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "this is the active version — activate another one first",
+        )
+    if not deleted:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "routine not found")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 

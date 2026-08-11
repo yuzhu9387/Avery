@@ -71,6 +71,9 @@ async def test_reseed_with_a_renamed_seed_tag_is_409_not_500(client):
     routine_id = (await client.get("/api/routines/active")).json()["id"]
 
     assert (await client.delete(f"/api/rules/{rule_id}")).status_code == 204
+    # The seeded routine is the active version, and an active version can't be
+    # deleted directly — activate a stand-in first, then remove the seeded one.
+    await client.post("/api/routines", json={"name": "Stand-in"})
     assert (await client.delete(f"/api/routines/{routine_id}")).status_code == 204
     await client.patch(f"/api/tags/{tags['Rest']}", json={"name": "Sleep"})
 
