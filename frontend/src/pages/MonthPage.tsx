@@ -5,8 +5,7 @@ import { Link, useNavigate, useOutletContext } from 'react-router-dom'
 import type { HeaderSlot } from '../App'
 import { listEvents } from '../api/events'
 import { qk } from '../api/keys'
-import { listTasks } from '../api/tasks'
-import type { AveryEvent, MonthDay, Task } from '../api/types'
+import type { AveryEvent, MonthDay } from '../api/types'
 import { CalendarSidebar } from '../components/CalendarSidebar'
 import { CalendarToolbar } from '../components/CalendarToolbar'
 import { Confetti, type Burst } from '../components/Confetti'
@@ -84,16 +83,6 @@ export default function MonthPage() {
     queryKey: qk.events({ start: rangeStart, end: rangeEnd }),
     queryFn: () => listEvents({ start: rangeStart, end: rangeEnd }),
   })
-
-  const tasksQuery = useQuery({
-    queryKey: qk.tasks({ include_archived: true }),
-    queryFn: () => listTasks({ include_archived: true }),
-  })
-  const taskMap = useMemo(() => {
-    const map = new Map<number, Task>()
-    for (const task of tasksQuery.data ?? []) map.set(task.id, task)
-    return map
-  }, [tasksQuery.data])
 
   // The hidden-category and hide-routine toggles only ever affect which cards draw
   // client-side, here and in DayPanel below — the aggregate totals each cell shows
@@ -219,7 +208,6 @@ export default function MonthPage() {
                   isToday={cell.date === todayKey}
                   isSelected={cell.date === selected}
                   tagMap={tagMap}
-                  taskMap={taskMap}
                   onSelect={() => setSelected(cell.date)}
                   onOpen={onOpen}
                   onToggleComplete={onToggleComplete}
@@ -235,7 +223,6 @@ export default function MonthPage() {
             total={selectedDay?.total_minutes ?? 0}
             eventCount={selectedDay?.event_count ?? 0}
             tagMap={tagMap}
-            taskMap={taskMap}
             hidden={hidden}
             hideRoutine={hideRoutine}
             onClose={() => setSelected(null)}
@@ -255,7 +242,6 @@ function DayCell({
   isToday,
   isSelected,
   tagMap,
-  taskMap,
   onSelect,
   onOpen,
   onToggleComplete,
@@ -266,7 +252,6 @@ function DayCell({
   isToday: boolean
   isSelected: boolean
   tagMap: ReturnType<typeof useTagMap>
-  taskMap: Map<number, Task>
   onSelect: () => void
   onOpen: (event: AveryEvent) => void
   onToggleComplete: (event: AveryEvent, point: { x: number; y: number }) => void
@@ -307,7 +292,7 @@ function DayCell({
             key={event.id}
             event={event}
             tag={tagMap.get(event.tag_ids[0])}
-            title={taskMap.get(event.task_id)?.name ?? `Task #${event.task_id}`}
+            title={event.title}
             onOpen={onOpen}
             onToggleComplete={onToggleComplete}
           />
@@ -332,7 +317,6 @@ function DayPanel({
   total,
   eventCount,
   tagMap,
-  taskMap,
   hidden,
   hideRoutine,
   onClose,
@@ -341,7 +325,6 @@ function DayPanel({
   total: number
   eventCount: number
   tagMap: ReturnType<typeof useTagMap>
-  taskMap: Map<number, Task>
   hidden: Set<number>
   hideRoutine: boolean
   onClose: () => void
@@ -382,9 +365,13 @@ function DayPanel({
         {events.map((event: AveryEvent) => (
           <li key={event.id} className="border-b border-line pb-2 last:border-b-0">
             <div className="text-xs text-ink-faint">{formatTimeRange(event.start_at, event.end_at)}</div>
-            <Link to={`/tasks/${event.task_id}`} className="text-sm text-ink hover:underline">
-              {taskMap.get(event.task_id)?.name ?? `Task #${event.task_id}`}
-            </Link>
+            {event.task_id !== null ? (
+              <Link to={`/tasks/${event.task_id}`} className="text-sm text-ink hover:underline">
+                {event.title}
+              </Link>
+            ) : (
+              <span className="text-sm text-ink">{event.title}</span>
+            )}
             {event.tag_ids.length > 0 && (
               <div className="mt-1 flex flex-wrap gap-1">
                 {event.tag_ids.map((id) => (

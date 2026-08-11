@@ -42,6 +42,9 @@ export default function TasksPage() {
   const eventsByTask = useMemo(() => {
     const map = new Map<number, AveryEvent[]>()
     for (const event of eventsQuery.data ?? []) {
+      // A plain calendar event or a routine-materialized event carries no Task —
+      // only a to-do (`task_id` set) belongs in this per-task lookup.
+      if (event.task_id === null) continue
       const list = map.get(event.task_id)
       if (list) list.push(event)
       else map.set(event.task_id, [event])

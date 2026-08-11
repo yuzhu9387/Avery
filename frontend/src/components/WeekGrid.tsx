@@ -1,6 +1,6 @@
 import { useCallback, useRef } from 'react'
 
-import type { AveryEvent, Tag, Task } from '../api/types'
+import type { AveryEvent, Tag } from '../api/types'
 import type { DragDraft } from '../hooks/useEventDrag'
 import type { GestureOrigin } from '../hooks/useCardGestures'
 import { useCardGestures } from '../hooks/useCardGestures'
@@ -155,7 +155,6 @@ export function WeekGrid({
   weekStart,
   events,
   tagMap,
-  taskMap,
   onOpen,
   onToggleComplete,
   onDragStart,
@@ -169,7 +168,6 @@ export function WeekGrid({
   weekStart: Date
   events: AveryEvent[]
   tagMap: Map<number, Tag>
-  taskMap: Map<number, Task>
   /** Opens the detail page for a card after a single, un-repeated press. */
   onOpen: (event: AveryEvent) => void
   /** Toggles completion; `point` is the viewport coordinate the confetti burst
@@ -366,7 +364,7 @@ export function WeekGrid({
                     event={event}
                     segment={renderSegment}
                     tag={tagMap.get(event.tag_ids[0])}
-                    title={taskMap.get(event.task_id)?.name ?? `Task #${event.task_id}`}
+                    title={event.title}
                     columnIndex={segment.columnIndex}
                     columnCount={segment.columnCount}
                     columnSpan={segment.columnSpan}

@@ -15,6 +15,13 @@ const fromTimeInput = (value: string) => {
 }
 
 export interface QuickCreateDraft {
+  /** The event's own display name — always sent, for both kinds. */
+  title: string
+  // The backend's EventCreate schema requires either `task_id` or `task_name`
+  // regardless of `kind` (see app/schemas/event.py's `check` validator); quick-create
+  // never sends `task_id`, so `task_name` must ride along even for a plain `event`,
+  // where it's used only to satisfy that check and never mints a Task. For a `task`
+  // card it also becomes the freshly-minted Task's own name.
   task_name: string
   kind: EventKind
   start_at: string
@@ -65,6 +72,7 @@ export function QuickCreatePopover({
         ? new Date(midnight.getTime() + endMinutes * 60000)
         : new Date(addDays(midnight, 1).getTime() + endMinutes * 60000)
     onSave({
+      title: name.trim(),
       task_name: name.trim(),
       kind,
       start_at: formatLocal(start),

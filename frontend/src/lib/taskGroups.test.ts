@@ -32,6 +32,7 @@ function makeTask(overrides: Partial<Task> & { id: number }): Task {
 /** Every field an `AveryEvent` needs, with sane defaults. */
 function makeEvent(overrides: Partial<AveryEvent> & { id: number; task_id: number }): AveryEvent {
   return {
+    title: `Event ${overrides.id}`,
     start_at: '2026-08-12T09:00:00',
     end_at: '2026-08-12T10:00:00',
     tag_ids: [],

@@ -1,14 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useOutletContext } from 'react-router-dom'
 
 import type { HeaderSlot } from '../App'
 import { errorMessage } from '../api/client'
 import { invalidateCalendar } from '../api/invalidate'
-import { qk } from '../api/keys'
-import { listTasks } from '../api/tasks'
 import { materializeWeek } from '../api/routines'
-import type { AveryEvent, Task } from '../api/types'
+import type { AveryEvent } from '../api/types'
 import { CalendarSidebar } from '../components/CalendarSidebar'
 import { CalendarToolbar } from '../components/CalendarToolbar'
 import { Confetti, type Burst } from '../components/Confetti'
@@ -99,25 +97,6 @@ export default function WeekPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gridEl])
 
-  const tasksQuery = useQuery({
-    // Archived tasks are included for the same reason useTagMap includes archived
-    // tags: an old event still points at one and the grid needs its name to render.
-    queryKey: qk.tasks({ include_archived: true }),
-    queryFn: () => listTasks({ include_archived: true }),
-    // Gated on the week query resolving first: `getWeek` can materialize new tasks
-    // on read (see week.materialized). Firing this in parallel let it race the
-    // materializing request and cache an empty/stale task list for `staleTime`,
-    // which is why every block fell back to "Task #N" the first time a week
-    // materialized. Waiting for `week` to settle guarantees those tasks already
-    // committed by the time this fetch runs.
-    enabled: week.isSuccess,
-  })
-  const taskMap = useMemo(() => {
-    const map = new Map<number, Task>()
-    for (const task of tasksQuery.data ?? []) map.set(task.id, task)
-    return map
-  }, [tasksQuery.data])
-
   const queryClient = useQueryClient()
   const materialize = useMutation({
     mutationFn: () => materializeWeek(day),
@@ -198,7 +177,6 @@ export default function WeekPage() {
               weekStart={monday}
               events={visibleEvents}
               tagMap={tagMap}
-              taskMap={taskMap}
               onOpen={onOpen}
               onToggleComplete={onToggleComplete}
               onDragStart={beginMove}

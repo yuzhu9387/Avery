@@ -6,7 +6,6 @@ import { errorMessage } from '../api/client'
 import { deleteEvent, getEvent, updateEvent } from '../api/events'
 import { invalidateCalendar } from '../api/invalidate'
 import { qk } from '../api/keys'
-import { getTask, updateTask } from '../api/tasks'
 import { TagChip } from '../components/TagChip'
 import { useEventMutations } from '../hooks/useEventMutations'
 import { useTags } from '../hooks/useTags'
@@ -44,11 +43,6 @@ export default function EventDetailPage() {
   const [tagIdsDraft, setTagIdsDraft] = useState<number[] | null>(null)
 
   const event = useQuery({ queryKey: qk.event(id), queryFn: () => getEvent(id) })
-  const task = useQuery({
-    queryKey: qk.task(event.data?.task_id ?? 0),
-    queryFn: () => getTask(event.data!.task_id),
-    enabled: event.isSuccess,
-  })
 
   const remove = useMutation({
     mutationFn: () => deleteEvent(id),
@@ -66,11 +60,8 @@ export default function EventDetailPage() {
   })
 
   const saveName = useMutation({
-    mutationFn: (body: { name: string }) => updateTask(event.data!.task_id, body),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['tasks'] })
-      queryClient.invalidateQueries({ queryKey: qk.task(event.data!.task_id) })
-    },
+    mutationFn: (body: { title: string }) => updateEvent(id, body),
+    onSuccess: () => invalidateCalendar(queryClient),
   })
 
   const saveTags = useMutation({
@@ -95,8 +86,7 @@ export default function EventDetailPage() {
   // loaded event changes, re-derive the time drafts from its data before this
   // render commits, so there is no frame where the inputs briefly show stale
   // minutes. Name/notes/tag drafts are reset to `null` instead of pre-filled —
-  // they read live from `task.data`/`data` at render time (see below), which
-  // avoids a race where this block runs before `task` has finished loading.
+  // they read live from `data` at render time (see below).
   // A save of this same event doesn't retrigger this — `data.id` is unchanged, so
   // the drafts (already holding what was just saved) are left as the source of truth.
   if (data.id !== syncedId) {
@@ -110,7 +100,7 @@ export default function EventDetailPage() {
     setTagIdsDraft(null)
   }
 
-  const displayName = nameDraft ?? task.data?.name ?? ''
+  const displayName = nameDraft ?? data.title
   const displayNotes = notesDraft ?? data.notes
   const displayTagIds = tagIdsDraft ?? data.tag_ids
 
@@ -131,7 +121,7 @@ export default function EventDetailPage() {
 
   const commitName = () => {
     const trimmed = displayName.trim()
-    if (trimmed && task.data && trimmed !== task.data.name) saveName.mutate({ name: trimmed })
+    if (trimmed && trimmed !== data.title) saveName.mutate({ title: trimmed })
   }
 
   const commitNotes = () => {
@@ -167,7 +157,7 @@ export default function EventDetailPage() {
             e.currentTarget.blur()
           }
         }}
-        aria-label="Task name"
+        aria-label="Event title"
         style={isDone ? { textDecoration: 'line-through' } : undefined}
         className="mt-3 w-full border-none bg-transparent text-xl outline-none focus:ring-0"
       />
@@ -300,12 +290,14 @@ export default function EventDetailPage() {
         </button>
 
         <div className="ml-auto flex flex-wrap items-center gap-2">
-        <Link
-          to={`/tasks/${data.task_id}`}
-          className="rounded-[8px] px-3 py-1.5 text-sm text-ink-muted transition-colors hover:bg-[var(--pale)]/50 hover:text-ink"
-        >
-          Open the task
-        </Link>
+        {data.task_id !== null && (
+          <Link
+            to={`/tasks/${data.task_id}`}
+            className="rounded-[8px] px-3 py-1.5 text-sm text-ink-muted transition-colors hover:bg-[var(--pale)]/50 hover:text-ink"
+          >
+            Open the task
+          </Link>
+        )}
         {/* Routine-born events don't own their own schedule — the block that
          *  generated them does, and only the Routine page edits blocks. Passed as a
          *  `?block=<id>` query param on the route rather than router state, so the

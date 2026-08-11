@@ -4,8 +4,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 
 import { listEvents } from '../api/events'
 import { qk } from '../api/keys'
-import { listTasks } from '../api/tasks'
-import type { AveryEvent, Task } from '../api/types'
+import type { AveryEvent } from '../api/types'
 import { useRules } from '../hooks/useRules'
 import { useTagMap } from '../hooks/useTags'
 import { formatMinutes, formatTimeRange, parseLocal } from '../lib/datetime'
@@ -54,17 +53,6 @@ export default function EventsListPage() {
     queryKey: qk.events(range ?? {}),
     queryFn: () => listEvents(range),
   })
-  const tasksQuery = useQuery({
-    queryKey: qk.tasks({ include_archived: true }),
-    queryFn: () => listTasks({ include_archived: true }),
-  })
-
-  const taskMap = useMemo(() => {
-    const map = new Map<number, Task>()
-    for (const t of tasksQuery.data ?? []) map.set(t.id, t)
-    return map
-  }, [tasksQuery.data])
-
   /** Which tags this view is restricted to, or `null` for "no filter".
    *
    *  A `group` is resolved through the *active* rule, which is the same rule the
@@ -143,7 +131,7 @@ export default function EventsListPage() {
                         className="min-w-0 flex-1 truncate text-sm text-ink hover:underline"
                         style={done ? { textDecoration: 'line-through', opacity: 0.55 } : undefined}
                       >
-                        {taskMap.get(event.task_id)?.name ?? `Task #${event.task_id}`}
+                        {event.title}
                       </Link>
                       <span className="w-[104px] shrink-0 text-right text-xs tabular-nums text-ink-faint">
                         {formatTimeRange(event.start_at, event.end_at)}

@@ -30,7 +30,13 @@ export interface Task {
 
 export interface AveryEvent {
   id: number
-  task_id: number
+  /** `null` for a plain calendar event or a routine-materialized event — only a
+   *  `kind: 'task'` card (or an event explicitly scheduled onto an existing to-do)
+   *  carries a Task. */
+  task_id: number | null
+  /** The event's own display name — always non-empty, regardless of whether it has
+   *  a linked Task. */
+  title: string
   start_at: string
   end_at: string
   tag_ids: number[]

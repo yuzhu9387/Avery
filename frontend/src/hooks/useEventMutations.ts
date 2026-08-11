@@ -5,6 +5,7 @@ import { invalidateCalendar } from '../api/invalidate'
 import type { AveryEvent, EventKind } from '../api/types'
 
 export interface NewEvent {
+  title: string
   task_name: string
   kind: EventKind
   start_at: string
