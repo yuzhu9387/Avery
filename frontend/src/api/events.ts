@@ -14,3 +14,12 @@ export const moveEvent = (id: number, start_at: string) =>
   apiSend<AveryEvent>('POST', `/events/${id}/move`, { start_at })
 
 export const deleteEvent = (id: number) => apiSend<void>('DELETE', `/events/${id}`)
+
+export const completeEvent = (id: number) =>
+  apiSend<AveryEvent>('POST', `/events/${id}/complete`)
+
+export const uncompleteEvent = (id: number) =>
+  apiSend<AveryEvent>('POST', `/events/${id}/uncomplete`)
+
+export const rollOverEvents = (event_ids: number[], to_date: string) =>
+  apiSend<AveryEvent[]>('POST', '/events/roll-over', { event_ids, to_date })

@@ -2,6 +2,7 @@ export type Verdict = 'pass' | 'over' | 'under'
 export type TaskStatus = 'todo' | 'doing' | 'done' | 'archived'
 export type Priority = 'low' | 'normal' | 'high'
 export type EventSource = 'template' | 'manual' | 'agent'
+export type EventKind = 'event' | 'task'
 export type Channel = 'inapp' | 'lark' | 'both'
 
 export interface Tag {
@@ -36,6 +37,8 @@ export interface AveryEvent {
   source: EventSource
   template_block_id: number | null
   notes: string
+  kind: EventKind
+  completed_at: string | null
 }
 
 export interface TemplateBlock {

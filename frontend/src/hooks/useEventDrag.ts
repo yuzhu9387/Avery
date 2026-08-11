@@ -2,6 +2,7 @@ import { useCallback, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 
 import { moveEvent, updateEvent } from '../api/events'
+import { invalidateCalendar } from '../api/invalidate'
 import type { AveryEvent } from '../api/types'
 import { resolveDrag } from '../lib/drag'
 import { GRID, pxToMinutes } from '../lib/geometry'
@@ -29,18 +30,8 @@ export function useEventDrag() {
   const queryClient = useQueryClient()
   const [draft, setDraft] = useState<DragDraft | null>(null)
 
-  const settle = useCallback(() => {
-    // The week payload and every ratio derived from it (the rule rail) are now stale.
-    queryClient.invalidateQueries({ queryKey: ['week'] })
-    queryClient.invalidateQueries({ queryKey: ['evaluate'] })
-    queryClient.invalidateQueries({ queryKey: ['month'] })
-    // A dragged event's minutes also feed the task rollup (TaskDetailPage's total,
-    // TasksPage's list, MonthPage's day panel) and the raw event list — all must go
-    // stale too.
-    queryClient.invalidateQueries({ queryKey: ['task'] })
-    queryClient.invalidateQueries({ queryKey: ['tasks'] })
-    queryClient.invalidateQueries({ queryKey: ['events'] })
-  }, [queryClient])
+  // Every key an event is visible through — see invalidateCalendar for why all of them.
+  const settle = useCallback(() => invalidateCalendar(queryClient), [queryClient])
 
   const move = useMutation({
     mutationFn: ({ id, start_at }: { id: number; start_at: string }) => moveEvent(id, start_at),
