@@ -4,6 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Event, Task
+from app.models.event import EventKind
 from app.schemas.event import EventCreate, EventUpdate
 from app.services import tasks as task_service
 from app.services.tags import assert_tags_exist
@@ -46,6 +47,11 @@ async def create_event(session: AsyncSession, data: EventCreate) -> Event:
         task = await session.get(Task, data.task_id)
         if task is None:
             raise TaskNotFound(f"task {data.task_id} not found")
+    elif data.kind == EventKind.TASK:
+        # A task card is 1:1 with its Task so completion can sync without two cards
+        # fighting over one status. Event cards keep reusing a Task by name, so
+        # repeated "Standup" blocks still roll up to a single task's minutes.
+        task = await task_service.create_by_name(session, data.task_name, tag_ids)
     else:
         task = await task_service.find_or_create_by_name(session, data.task_name, tag_ids)
     if not tag_ids:

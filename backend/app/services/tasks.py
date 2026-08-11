@@ -129,6 +129,15 @@ async def archive_task(session: AsyncSession, task_id: int) -> Task | None:
     return task
 
 
+async def create_by_name(session: AsyncSession, name: str, tag_ids: list[int]) -> Task:
+    """Always mints a new Task. Used where reuse would be wrong — see create_event."""
+    task = Task(name=name, tag_ids=list(tag_ids))
+    session.add(task)
+    await session.commit()
+    await session.refresh(task)
+    return task
+
+
 async def find_or_create_by_name(
     session: AsyncSession, name: str, tag_ids: list[int]
 ) -> Task:
@@ -146,8 +155,4 @@ async def find_or_create_by_name(
     existing = (await session.scalars(stmt)).first()
     if existing is not None:
         return existing
-    task = Task(name=name, tag_ids=list(tag_ids))
-    session.add(task)
-    await session.commit()
-    await session.refresh(task)
-    return task
+    return await create_by_name(session, name, tag_ids)
