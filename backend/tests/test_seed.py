@@ -1,10 +1,10 @@
-async def test_seed_creates_tags_rule_and_template(client):
+async def test_seed_creates_tags_rule_and_routine(client):
     result = await client.post("/api/seed")
     assert result.status_code == 200
     body = result.json()
     assert body["tags"] == 8
     assert body["rules"] == 1
-    assert body["templates"] == 1
+    assert body["routines"] == 1
 
     tags = (await client.get("/api/tags")).json()
     assert [t["name"] for t in tags] == [
@@ -28,15 +28,15 @@ async def test_seeded_rule_is_631_with_rest_and_personal_excluded(client):
 async def test_seed_is_idempotent(client):
     await client.post("/api/seed")
     second = (await client.post("/api/seed")).json()
-    assert second == {"tags": 0, "rules": 0, "templates": 0}
+    assert second == {"tags": 0, "rules": 0, "routines": 0}
     assert len((await client.get("/api/tags")).json()) == 8
     assert len((await client.get("/api/rules")).json()) == 1
 
 
-async def test_seeded_template_matches_the_source_grid(client):
+async def test_seeded_routine_matches_the_source_grid(client):
     await client.post("/api/seed")
-    template = (await client.get("/api/templates/active")).json()
-    blocks = template["blocks"]
+    routine = (await client.get("/api/routines/active")).json()
+    blocks = routine["blocks"]
 
     weekday_work = next(
         b for b in blocks if b["task_name"] == "Work" and b["days"] == [1, 2, 3, 4, 5]
@@ -53,25 +53,25 @@ async def test_seeded_template_matches_the_source_grid(client):
     assert any(b["task_name"] == "Personal time" and b["days"] == [6] for b in blocks)
 
 
-async def test_seeded_template_has_exactly_19_blocks(client):
-    """The template is now seeded in a single commit built from raw ORM rows. A
+async def test_seeded_routine_has_exactly_19_blocks(client):
+    """The routine is now seeded in a single commit built from raw ORM rows. A
     partial seed (interrupted mid-loop under the old per-block-commit code) must
     be impossible to mistake for success."""
     await client.post("/api/seed")
-    template = (await client.get("/api/templates/active")).json()
-    assert len(template["blocks"]) == 19
+    routine = (await client.get("/api/routines/active")).json()
+    assert len(routine["blocks"]) == 19
 
 
 async def test_reseed_with_a_renamed_seed_tag_is_409_not_500(client):
-    """A seed tag can be renamed, and the rule/template lookup would then find
+    """A seed tag can be renamed, and the rule/routine lookup would then find
     nothing. That must be a clear 409, not an unhandled KeyError."""
     await client.post("/api/seed")
     tags = {t["name"]: t["id"] for t in (await client.get("/api/tags")).json()}
     rule_id = (await client.get("/api/rules/active")).json()["id"]
-    template_id = (await client.get("/api/templates/active")).json()["id"]
+    routine_id = (await client.get("/api/routines/active")).json()["id"]
 
     assert (await client.delete(f"/api/rules/{rule_id}")).status_code == 204
-    assert (await client.delete(f"/api/templates/{template_id}")).status_code == 204
+    assert (await client.delete(f"/api/routines/{routine_id}")).status_code == 204
     await client.patch(f"/api/tags/{tags['Rest']}", json={"name": "Sleep"})
 
     again = await client.post("/api/seed")

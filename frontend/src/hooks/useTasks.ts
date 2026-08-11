@@ -36,7 +36,7 @@ export function useUpdateTask() {
   })
 }
 
-/** Archiving can remove a task from what the template and rule pickers show —
+/** Archiving can remove a task from what the routine and rule pickers show —
  *  the week grid names tasks by id and rule evaluation groups by tag through
  *  events, both of which read stale if those caches are not also dropped. */
 export function useArchiveTask() {

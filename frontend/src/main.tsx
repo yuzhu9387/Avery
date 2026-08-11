@@ -6,11 +6,10 @@ import { RouterProvider, createBrowserRouter } from 'react-router-dom'
 import App from './App'
 import EventDetailPage from './pages/EventDetailPage'
 import MonthPage from './pages/MonthPage'
-import ReviewPage from './pages/ReviewPage'
+import RoutinePage from './pages/RoutinePage'
 import RulesPage from './pages/RulesPage'
 import TaskDetailPage from './pages/TaskDetailPage'
 import TasksPage from './pages/TasksPage'
-import TemplatePage from './pages/TemplatePage'
 import WeekPage from './pages/WeekPage'
 import './index.css'
 
@@ -28,9 +27,12 @@ const router = createBrowserRouter([
       { path: 'month', element: <MonthPage /> },
       { path: 'tasks', element: <TasksPage /> },
       { path: 'tasks/:taskId', element: <TaskDetailPage /> },
-      { path: 'template', element: <TemplatePage /> },
+      { path: 'routine', element: <RoutinePage /> },
       { path: 'rules', element: <RulesPage /> },
-      { path: 'review', element: <ReviewPage /> },
+      // The Review route is off for now. `pages/ReviewPage.tsx`, `hooks/useReports.ts`
+      // and `components/GroupChart.tsx` are deliberately left on disk, and the
+      // backend's /api/reports is untouched, so putting it back is this line plus
+      // the nav entry in App.tsx.
     ],
   },
 ])

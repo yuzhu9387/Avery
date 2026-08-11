@@ -59,7 +59,7 @@ export function QuickCreatePopover({
     const midnight = new Date(slot.day.getFullYear(), slot.day.getMonth(), slot.day.getDate())
     const start = new Date(midnight.getTime() + startMinutes * 60000)
     // An end at or before the start is read as crossing midnight, which is what a
-    // 23:00-01:00 block means — the same convention the template already uses.
+    // 23:00-01:00 block means — the same convention the routine already uses.
     const end =
       endMinutes > startMinutes
         ? new Date(midnight.getTime() + endMinutes * 60000)

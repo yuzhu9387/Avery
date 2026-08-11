@@ -9,11 +9,11 @@ WEEKDAY_BLOCK = {
 }
 
 
-async def _template(client, blocks=None):
-    template_id = (await client.post("/api/templates", json={"name": "Default"})).json()["id"]
+async def _routine(client, blocks=None):
+    routine_id = (await client.post("/api/routines", json={"name": "Default"})).json()["id"]
     for block in blocks or [WEEKDAY_BLOCK]:
-        await client.post(f"/api/templates/{template_id}/blocks", json=block)
-    return template_id
+        await client.post(f"/api/routines/{routine_id}/blocks", json=block)
+    return routine_id
 
 
 def _this_monday() -> date:
@@ -22,7 +22,7 @@ def _this_monday() -> date:
 
 
 async def test_week_payload_has_bounds_and_events(client):
-    await _template(client)
+    await _routine(client)
     monday = _this_monday()
     result = await client.get(f"/api/weeks/{monday.isoformat()}")
     assert result.status_code == 200
@@ -34,7 +34,7 @@ async def test_week_payload_has_bounds_and_events(client):
 
 
 async def test_current_week_lazily_materializes(client):
-    await _template(client)
+    await _routine(client)
     monday = _this_monday()
     assert (await client.get(f"/api/weeks/{monday.isoformat()}")).json()["materialized"] is True
     # Second read must not create anything further.
@@ -44,7 +44,7 @@ async def test_current_week_lazily_materializes(client):
 
 
 async def test_next_week_lazily_materializes(client):
-    await _template(client)
+    await _routine(client)
     next_monday = _this_monday() + timedelta(days=7)
     body = (await client.get(f"/api/weeks/{next_monday.isoformat()}")).json()
     assert body["materialized"] is True
@@ -52,7 +52,7 @@ async def test_next_week_lazily_materializes(client):
 
 
 async def test_past_weeks_are_never_materialized(client):
-    await _template(client)
+    await _routine(client)
     past_monday = _this_monday() - timedelta(days=7)
     body = (await client.get(f"/api/weeks/{past_monday.isoformat()}")).json()
     assert body["materialized"] is False
@@ -60,14 +60,14 @@ async def test_past_weeks_are_never_materialized(client):
 
 
 async def test_week_beyond_next_is_not_materialized(client):
-    await _template(client)
+    await _routine(client)
     far = _this_monday() + timedelta(days=21)
     body = (await client.get(f"/api/weeks/{far.isoformat()}")).json()
     assert body["materialized"] is False
     assert body["events"] == []
 
 
-async def test_week_without_template_returns_empty_not_error(client):
+async def test_week_without_routine_returns_empty_not_error(client):
     monday = _this_monday()
     body = (await client.get(f"/api/weeks/{monday.isoformat()}")).json()
     assert body["events"] == []
@@ -125,10 +125,10 @@ async def test_untagged_events_still_count_toward_total_minutes(client):
     assert cell["minutes_by_primary_tag"] == {}
 
 
-async def test_materialized_is_false_when_the_template_creates_nothing(client):
-    """An active template with no block matching this week legitimately creates
+async def test_materialized_is_false_when_the_routine_creates_nothing(client):
+    """An active routine with no block matching this week legitimately creates
     zero events. Reporting materialized: true there tells the UI a lie."""
-    await client.post("/api/templates", json={"name": "Empty"})
+    await client.post("/api/routines", json={"name": "Empty"})
     monday = _this_monday()
 
     body = (await client.get(f"/api/weeks/{monday.isoformat()}")).json()
@@ -139,7 +139,7 @@ async def test_materialized_is_false_when_the_template_creates_nothing(client):
 async def test_an_event_bleeding_in_does_not_suppress_the_week(client):
     """Gating materialization on overlap let one Sunday-night block from the previous
     week blank the entire following week."""
-    await _template(client, [WEEKDAY_BLOCK])
+    await _routine(client, [WEEKDAY_BLOCK])
     monday = _this_monday()
     prev_sunday = monday - timedelta(days=1)
 

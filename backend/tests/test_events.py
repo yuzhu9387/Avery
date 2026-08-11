@@ -232,7 +232,7 @@ async def test_db_cascade_removes_events_when_a_task_row_is_deleted(client, sess
 async def test_patching_tag_ids_to_empty_inherits_task_tags(client):
     """update_event must treat an empty tag_ids the same way create_event does:
     as "inherit the task's", not "have none" — the identical regression class
-    already fixed for template blocks."""
+    already fixed for routine blocks."""
     tag_id = (
         await client.post("/api/tags", json={"name": "Deep work", "color": "#DA96A4"})
     ).json()["id"]

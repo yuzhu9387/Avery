@@ -13,7 +13,7 @@ class EventCreate(BaseModel):
     tag_ids: list[int] = Field(default_factory=list)
     kind: EventKind = EventKind.EVENT
     source: EventSource = EventSource.MANUAL
-    template_block_id: int | None = None
+    routine_block_id: int | None = None
     notes: str = ""
 
     @model_validator(mode="after")
@@ -61,7 +61,7 @@ class EventOut(BaseModel):
     kind: EventKind
     completed_at: datetime | None
     source: EventSource
-    template_block_id: int | None
+    routine_block_id: int | None
     notes: str
 
 

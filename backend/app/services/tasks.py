@@ -9,7 +9,7 @@ from app.schemas.task import TaskCreate, TaskUpdate
 from app.services import analytics
 from app.services import events as event_service
 from app.services import tags as tag_service
-from app.services import templates as template_service
+from app.services import routines as routine_service
 
 
 async def list_tasks(
@@ -54,7 +54,7 @@ async def task_stats(
         return None
 
     anchor = today or date.today()
-    week_start, week_end = template_service.week_bounds(anchor)
+    week_start, week_end = routine_service.week_bounds(anchor)
     month_start = anchor.replace(day=1)
     month_end = date(
         anchor.year + (anchor.month == 12), (anchor.month % 12) + 1, 1
@@ -141,7 +141,7 @@ async def create_by_name(session: AsyncSession, name: str, tag_ids: list[int]) -
 async def find_or_create_by_name(
     session: AsyncSession, name: str, tag_ids: list[int]
 ) -> Task:
-    """Used by event creation and template materialization to keep one Task per name.
+    """Used by event creation and routine materialization to keep one Task per name.
 
     Archived tasks are skipped deliberately: matching them would let the Sunday roll
     re-attach a fresh week of events to a task the user archived, undoing the archive

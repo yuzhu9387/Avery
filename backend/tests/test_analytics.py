@@ -54,7 +54,7 @@ def test_perfect_631_all_pass():
 
 
 def test_spec_worked_example_fitness_fails_under():
-    """From the spec: a template weekday is 10h / 5h / 1h = 62.5/31.25/6.25%, so C is under."""
+    """From the spec: a routine weekday is 10h / 5h / 1h = 62.5/31.25/6.25%, so C is under."""
     slices = [
         slice_(1, WORK, 3, 9, 7.0),
         slice_(2, STUDY, 3, 21, 1.5),

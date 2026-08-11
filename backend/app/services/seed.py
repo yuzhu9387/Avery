@@ -1,4 +1,4 @@
-"""Seeds the tag set, the 6:3:1 rule, and the default weekly template.
+"""Seeds the tag set, the 6:3:1 rule, and the default weekly routine.
 
 Idempotent: running twice creates nothing the second time.
 """
@@ -8,7 +8,7 @@ from datetime import time
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Rule, Tag, Template, TemplateBlock
+from app.models import Rule, Tag, Routine, RoutineBlock
 from app.schemas.rule import RuleCreate, RuleGroup
 from app.schemas.tag import TagCreate
 from app.services import rules as rule_service
@@ -57,10 +57,10 @@ SEED_BLOCKS: list[tuple[list[int], time, time, str, str]] = [
 
 
 class SeedTagsMissing(Exception):
-    """A tag the seed rule or template must reference is absent.
+    """A tag the seed rule or routine must reference is absent.
 
     Reachable in normal use: `DELETE /api/tags/{id}` archives rather than removes, and
-    a tag can be renamed. If the rule or template then needs re-seeding, the lookup has
+    a tag can be renamed. If the rule or routine then needs re-seeding, the lookup has
     nothing to resolve — which used to surface as an unhandled KeyError 500.
     """
 
@@ -74,7 +74,7 @@ async def _any(session: AsyncSession, model) -> bool:
 
 
 async def seed_all(session: AsyncSession) -> dict[str, int]:
-    created = {"tags": 0, "rules": 0, "templates": 0}
+    created = {"tags": 0, "rules": 0, "routines": 0}
 
     if not await _any(session, Tag):
         for index, (name, color, icon) in enumerate(SEED_TAGS):
@@ -84,15 +84,15 @@ async def seed_all(session: AsyncSession) -> dict[str, int]:
             created["tags"] += 1
 
     # include_archived=True: archiving is this app's delete, so an archived seed tag is
-    # still a real row whose id the rule and template must keep pointing at. Excluding
+    # still a real row whose id the rule and routine must keep pointing at. Excluding
     # them here turned a re-seed into a KeyError.
     by_name = {
         t.name: t.id for t in await tag_service.list_tags(session, include_archived=True)
     }
 
     needs_rule = not await _any(session, Rule)
-    needs_template = not await _any(session, Template)
-    if needs_rule or needs_template:
+    needs_routine = not await _any(session, Routine)
+    if needs_rule or needs_routine:
         missing = [name for name, _, _ in SEED_TAGS if name not in by_name]
         if missing:
             raise SeedTagsMissing(missing)
@@ -124,14 +124,14 @@ async def seed_all(session: AsyncSession) -> dict[str, int]:
         )
         created["rules"] += 1
 
-    if needs_template:
-        template = Template(name="Default week", is_active=True)
-        session.add(template)
-        await session.flush()  # assigns template.id without committing
+    if needs_routine:
+        routine = Routine(name="Default week", is_active=True)
+        session.add(routine)
+        await session.flush()  # assigns routine.id without committing
         for order, (days, start, end, task_name, tag_name) in enumerate(SEED_BLOCKS):
             session.add(
-                TemplateBlock(
-                    template_id=template.id,
+                RoutineBlock(
+                    routine_id=routine.id,
                     days=list(days),
                     start_time=start,
                     end_time=end,
@@ -141,6 +141,6 @@ async def seed_all(session: AsyncSession) -> dict[str, int]:
                 )
             )
         await session.commit()
-        created["templates"] += 1
+        created["routines"] += 1
 
     return created

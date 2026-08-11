@@ -3,7 +3,7 @@ from datetime import datetime, time
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
-class TemplateBlockCreate(BaseModel):
+class RoutineBlockCreate(BaseModel):
     days: list[int] = Field(min_length=1)
     start_time: time
     end_time: time
@@ -19,11 +19,11 @@ class TemplateBlockCreate(BaseModel):
         return value
 
 
-class TemplateBlockOut(BaseModel):
+class RoutineBlockOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    template_id: int
+    routine_id: int
     days: list[int]
     start_time: time
     end_time: time
@@ -32,19 +32,19 @@ class TemplateBlockOut(BaseModel):
     sort_order: int
 
 
-class TemplateCreate(BaseModel):
+class RoutineCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     is_active: bool = True
 
 
-class TemplateOut(BaseModel):
+class RoutineOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
     name: str
     is_active: bool
     created_at: datetime
-    blocks: list[TemplateBlockOut]
+    blocks: list[RoutineBlockOut]
 
 
 class MaterializeResult(BaseModel):
@@ -53,7 +53,7 @@ class MaterializeResult(BaseModel):
     skipped_days: list[str]
 
 
-class TemplateUpdate(BaseModel):
+class RoutineUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
     is_active: bool | None = None
 
@@ -65,7 +65,7 @@ class TemplateUpdate(BaseModel):
         return value
 
 
-class TemplateBlockUpdate(BaseModel):
+class RoutineBlockUpdate(BaseModel):
     """Partial patch. Every field optional; unset fields are left untouched."""
 
     days: list[int] | None = Field(default=None, min_length=1)

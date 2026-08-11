@@ -50,8 +50,8 @@ async def delete_tag(tag_id: int, session: AsyncSession = Depends(get_session)):
             message = f"{exc.event_count} event(s) still use this category"
         elif exc.task_count:
             message = "a task still uses this category"
-        elif exc.template_block_count:
-            message = "a template block still uses this category"
+        elif exc.routine_block_count:
+            message = "a routine block still uses this category"
         else:  # rule_count must be > 0
             message = "a rule still uses this category"
         raise HTTPException(status.HTTP_409_CONFLICT, message)

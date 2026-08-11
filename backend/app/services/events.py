@@ -69,7 +69,7 @@ async def create_event(session: AsyncSession, data: EventCreate) -> Event:
         tag_ids=tag_ids,
         kind=data.kind,
         source=data.source,
-        template_block_id=data.template_block_id,
+        routine_block_id=data.routine_block_id,
         notes=data.notes,
     )
     session.add(event)

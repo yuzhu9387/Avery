@@ -1,22 +1,22 @@
 import { useMemo, useState } from 'react'
 
 import { ApiError } from '../api/client'
-import type { PreviewResult, TemplateBlock } from '../api/types'
+import type { PreviewResult, RoutineBlock } from '../api/types'
 import { BlockForm } from '../components/BlockForm'
 import { Modal } from '../components/Modal'
 import { TagChip } from '../components/TagChip'
-import type { ColumnKey } from '../hooks/useTemplate'
+import type { ColumnKey } from '../hooks/useRoutine'
 import {
   classifyDays,
   formatDaySet,
-  useActiveTemplate,
+  useActiveRoutine,
   useCreateBlock,
-  useCreateTemplate,
+  useCreateRoutine,
   useDeleteBlock,
   usePreviewWeek,
   useUpdateBlock,
-  useUpdateTemplate,
-} from '../hooks/useTemplate'
+  useUpdateRoutine,
+} from '../hooks/useRoutine'
 import { useTagMap } from '../hooks/useTags'
 import { addDays, formatDate, formatMinutes, formatTimeRange, mondayOf, parseLocal } from '../lib/datetime'
 
@@ -33,7 +33,7 @@ const COLUMN_DEFS: { key: ColumnKey; title: string; presetDays?: number[] }[] = 
 /** `end_time <= start_time` is how an overnight block (e.g. 23:00–07:00 rest)
  *  is stored, not a validation error — so its duration wraps past midnight
  *  rather than coming out negative. */
-function blockMinutes(block: TemplateBlock): number {
+function blockMinutes(block: RoutineBlock): number {
   const [sh, sm] = block.start_time.split(':').map(Number)
   const [eh, em] = block.end_time.split(':').map(Number)
   const start = sh * 60 + sm
@@ -44,14 +44,14 @@ function blockMinutes(block: TemplateBlock): number {
 
 type ModalState =
   | { mode: 'create'; initialDays: number[] }
-  | { mode: 'edit'; block: TemplateBlock }
+  | { mode: 'edit'; block: RoutineBlock }
 
-export default function TemplatePage() {
-  const templateQuery = useActiveTemplate()
+export default function RoutinePage() {
+  const routineQuery = useActiveRoutine()
   const tagMap = useTagMap()
 
-  const updateTemplate = useUpdateTemplate()
-  const createTemplate = useCreateTemplate()
+  const updateRoutine = useUpdateRoutine()
+  const createRoutine = useCreateRoutine()
   const createBlock = useCreateBlock()
   const updateBlock = useUpdateBlock()
   const deleteBlock = useDeleteBlock()
@@ -59,12 +59,12 @@ export default function TemplatePage() {
   const previewDay = formatDate(addDays(mondayOf(new Date()), 7))
   const preview = usePreviewWeek(previewDay)
   const [previewRequested, setPreviewRequested] = useState(false)
-  // `usePreviewWeek` is `enabled: false`, so invalidating ['template'] after a block
+  // `usePreviewWeek` is `enabled: false`, so invalidating ['routine'] after a block
   // mutation marks it stale WITHOUT refetching (React Query v5 never refetches an
   // inactive query) — the panel would otherwise keep rendering `preview.data` from
   // before the edit. Holding the rendered result here, set only from an explicit
   // `refetch()`, and clearing it wherever a block mutation succeeds, means the panel
-  // can never disagree with what the template actually contains.
+  // can never disagree with what the routine actually contains.
   const [previewResult, setPreviewResult] = useState<PreviewResult | null>(null)
 
   const clearPreview = () => {
@@ -75,63 +75,63 @@ export default function TemplatePage() {
   const [modal, setModal] = useState<ModalState | null>(null)
   const [name, setName] = useState<string | null>(null)
 
-  const template = templateQuery.data
-  const displayName = name ?? template?.name ?? ''
+  const routine = routineQuery.data
+  const displayName = name ?? routine?.name ?? ''
 
   const grouped = useMemo(() => {
-    const map: Record<ColumnKey, TemplateBlock[]> = {
+    const map: Record<ColumnKey, RoutineBlock[]> = {
       everyday: [],
       weekday: [],
       saturday: [],
       sunday: [],
       custom: [],
     }
-    for (const block of template?.blocks ?? []) {
+    for (const block of routine?.blocks ?? []) {
       map[classifyDays(block.days)].push(block)
     }
     for (const key of Object.keys(map) as ColumnKey[]) {
       map[key] = [...map[key]].sort((a, b) => a.start_time.localeCompare(b.start_time))
     }
     return map
-  }, [template])
+  }, [routine])
 
-  // A 404 on /templates/active means "none configured yet" — a fresh database, or the
-  // active template was deleted — not "something broke". That state is recoverable
+  // A 404 on /routines/active means "none configured yet" — a fresh database, or the
+  // active routine was deleted — not "something broke". That state is recoverable
   // in-app, so it gets an empty state and a way out instead of a dead-end error.
-  const noActiveTemplate = templateQuery.error instanceof ApiError && templateQuery.error.status === 404
+  const noActiveRoutine = routineQuery.error instanceof ApiError && routineQuery.error.status === 404
 
-  if (templateQuery.isLoading) return <p className="p-6 text-sm text-ink-faint">Loading template…</p>
+  if (routineQuery.isLoading) return <p className="p-6 text-sm text-ink-faint">Loading routine…</p>
 
-  if (noActiveTemplate) {
+  if (noActiveRoutine) {
     return (
       <div className="mx-auto max-w-6xl p-6">
         <div className="rounded-[12px] border border-line bg-surface p-5">
           <p className="mb-3 text-sm text-ink-muted">
-            No active template yet. Create one to start generating weeks automatically.
+            No active routine yet. Create one to start generating weeks automatically.
           </p>
-          {createTemplate.isError && (
-            <p className="mb-3 text-xs text-[var(--over)]">Couldn't create the template.</p>
+          {createRoutine.isError && (
+            <p className="mb-3 text-xs text-[var(--over)]">Couldn't create the routine.</p>
           )}
           <button
             type="button"
-            disabled={createTemplate.isPending}
-            onClick={() => createTemplate.mutate({ name: 'Default week', is_active: true })}
+            disabled={createRoutine.isPending}
+            onClick={() => createRoutine.mutate({ name: 'Default week', is_active: true })}
             className="rounded-[8px] bg-[var(--pale)] px-3 py-1.5 text-sm font-medium text-ink transition-opacity hover:opacity-80 disabled:opacity-50"
           >
-            {createTemplate.isPending ? 'Creating…' : 'Create a template'}
+            {createRoutine.isPending ? 'Creating…' : 'Create a routine'}
           </button>
         </div>
       </div>
     )
   }
 
-  if (templateQuery.isError || !template) {
-    return <p className="p-6 text-sm text-ink-faint">Couldn't load the template.</p>
+  if (routineQuery.isError || !routine) {
+    return <p className="p-6 text-sm text-ink-faint">Couldn't load the routine.</p>
   }
 
   const commitName = () => {
-    if (name !== null && name.trim() && name.trim() !== template.name) {
-      updateTemplate.mutate({ id: template.id, body: { name: name.trim() } })
+    if (name !== null && name.trim() && name.trim() !== routine.name) {
+      updateRoutine.mutate({ id: routine.id, body: { name: name.trim() } })
     }
   }
 
@@ -141,11 +141,11 @@ export default function TemplatePage() {
     updateBlock.reset()
   }
 
-  const handleSubmit = (body: Partial<TemplateBlock>) => {
+  const handleSubmit = (body: Partial<RoutineBlock>) => {
     if (!modal) return
     if (modal.mode === 'create') {
       createBlock.mutate(
-        { templateId: template.id, body },
+        { routineId: routine.id, body },
         { onSuccess: () => { closeModal(); clearPreview() } },
       )
     } else {
@@ -156,7 +156,7 @@ export default function TemplatePage() {
     }
   }
 
-  const handleDelete = (block: TemplateBlock) => {
+  const handleDelete = (block: RoutineBlock) => {
     deleteBlock.mutate(block.id, { onSuccess: clearPreview })
   }
 
@@ -178,14 +178,14 @@ export default function TemplatePage() {
           onChange={(e) => setName(e.target.value)}
           onBlur={commitName}
           className="w-full flex-1 border-none bg-transparent font-display text-2xl outline-none focus:ring-0"
-          aria-label="Template name"
+          aria-label="Routine name"
         />
         <label className="flex shrink-0 items-center gap-2 text-sm text-ink-muted">
           <input
             type="checkbox"
-            checked={template.is_active}
+            checked={routine.is_active}
             onChange={(e) =>
-              updateTemplate.mutate({ id: template.id, body: { is_active: e.target.checked } })
+              updateRoutine.mutate({ id: routine.id, body: { is_active: e.target.checked } })
             }
           />
           Active
@@ -253,7 +253,7 @@ export default function TemplatePage() {
                     const start = parseLocal(row.start_at)
                     return (
                       <li
-                        key={`${row.template_block_id}-${i}`}
+                        key={`${row.routine_block_id}-${i}`}
                         className="flex items-center gap-3 border-b border-line px-3 py-2 last:border-b-0"
                       >
                         <span className="w-28 shrink-0 text-xs text-ink-faint">
@@ -304,11 +304,11 @@ function Column({
   onDelete,
 }: {
   title: string
-  blocks: TemplateBlock[]
+  blocks: RoutineBlock[]
   tagMap: ReturnType<typeof useTagMap>
   onAdd?: () => void
-  onEdit: (block: TemplateBlock) => void
-  onDelete: (block: TemplateBlock) => void
+  onEdit: (block: RoutineBlock) => void
+  onDelete: (block: RoutineBlock) => void
 }) {
   const totalMinutes = blocks.reduce((sum, b) => sum + blockMinutes(b), 0)
 
@@ -355,7 +355,7 @@ function BlockRow({
   onEdit,
   onDelete,
 }: {
-  block: TemplateBlock
+  block: RoutineBlock
   tagMap: ReturnType<typeof useTagMap>
   onEdit: () => void
   onDelete: () => void

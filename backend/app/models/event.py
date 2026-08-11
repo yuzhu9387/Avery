@@ -8,7 +8,7 @@ from app.database import Base
 
 
 class EventSource(StrEnum):
-    TEMPLATE = "template"
+    ROUTINE = "routine"
     MANUAL = "manual"
     AGENT = "agent"
 
@@ -33,7 +33,7 @@ class Event(Base):
     # A card's own completion, distinct from Task.status: an appointment happening is
     # not a to-do being finished. Only kind="task" cards sync the two (see services).
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    template_block_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    routine_block_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     notes: Mapped[str] = mapped_column(Text, default="", nullable=False)
 
     @property

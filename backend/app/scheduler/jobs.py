@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.database import async_session_factory
 from app.services import reminders as reminder_service
-from app.services import templates as template_service
+from app.services import routines as routine_service
 
 logger = logging.getLogger(__name__)
 _scheduler: AsyncIOScheduler | None = None
@@ -22,10 +22,10 @@ async def roll_next_week(session: AsyncSession, today: date) -> dict:
     """Materialize the week following `today`. Idempotent — safe to run repeatedly."""
     next_monday = today + timedelta(days=8 - today.isoweekday())
     try:
-        monday, created, skipped = await template_service.materialize_week(session, next_monday)
-    except template_service.NoActiveTemplate:
-        logger.warning("week roll skipped: no active template")
-        return {"week_start": None, "created": 0, "skipped_reason": "no active template"}
+        monday, created, skipped = await routine_service.materialize_week(session, next_monday)
+    except routine_service.NoActiveRoutine:
+        logger.warning("week roll skipped: no active routine")
+        return {"week_start": None, "created": 0, "skipped_reason": "no active routine"}
     return {
         "week_start": monday.isoformat(),
         "created": len(created),

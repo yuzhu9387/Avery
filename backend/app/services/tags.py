@@ -3,7 +3,7 @@ from collections.abc import Sequence
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Event, Rule, Tag, Task, TemplateBlock
+from app.models import Event, Rule, Tag, Task, RoutineBlock
 from app.schemas.tag import TagCreate, TagUpdate
 
 
@@ -26,12 +26,12 @@ class TagInUse(Exception):
         self,
         event_count: int = 0,
         task_count: int = 0,
-        template_block_count: int = 0,
+        routine_block_count: int = 0,
         rule_count: int = 0,
     ) -> None:
         self.event_count = event_count
         self.task_count = task_count
-        self.template_block_count = template_block_count
+        self.routine_block_count = routine_block_count
         self.rule_count = rule_count
         super().__init__("tag is in use")
 
@@ -110,9 +110,9 @@ async def delete_tag(session: AsyncSession, tag_id: int) -> bool:
     task_rows = (await session.scalars(select(Task.tag_ids))).all()
     task_count = sum(1 for tag_ids in task_rows if tag_id in (tag_ids or []))
 
-    # Count template blocks using this tag
-    template_rows = (await session.scalars(select(TemplateBlock.tag_ids))).all()
-    template_block_count = sum(1 for tag_ids in template_rows if tag_id in (tag_ids or []))
+    # Count routine blocks using this tag
+    routine_rows = (await session.scalars(select(RoutineBlock.tag_ids))).all()
+    routine_block_count = sum(1 for tag_ids in routine_rows if tag_id in (tag_ids or []))
 
     # Count rules using this tag (in exclude_tag_ids or groups[*].tag_ids)
     rule_rows = (await session.scalars(select(Rule))).all()
@@ -127,11 +127,11 @@ async def delete_tag(session: AsyncSession, tag_id: int) -> bool:
                     break  # Count once per rule even if multiple groups use it
 
     # If anything uses this tag, refuse deletion
-    if event_count or task_count or template_block_count or rule_count:
+    if event_count or task_count or routine_block_count or rule_count:
         raise TagInUse(
             event_count=event_count,
             task_count=task_count,
-            template_block_count=template_block_count,
+            routine_block_count=routine_block_count,
             rule_count=rule_count,
         )
 

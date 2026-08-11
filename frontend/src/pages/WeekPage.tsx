@@ -7,7 +7,7 @@ import { ApiError, errorMessage } from '../api/client'
 import { invalidateCalendar } from '../api/invalidate'
 import { qk } from '../api/keys'
 import { listTasks } from '../api/tasks'
-import { materializeWeek } from '../api/templates'
+import { materializeWeek } from '../api/routines'
 import type { AveryEvent, Task } from '../api/types'
 import { CategoryRail } from '../components/CategoryRail'
 import { Confetti, type Burst } from '../components/Confetti'
@@ -198,7 +198,7 @@ export default function WeekPage() {
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {week.data?.materialized && (
           <div className="border-b border-line px-4 py-1.5 text-xs text-ink-faint">
-            Generated from your template
+            Generated from your routine
           </div>
         )}
 
@@ -211,7 +211,7 @@ export default function WeekPage() {
               disabled={materialize.isPending}
               onClick={() => materialize.mutate()}
             >
-              {materialize.isPending ? 'Generating…' : 'Generate from template'}
+              {materialize.isPending ? 'Generating…' : 'Generate from routine'}
             </button>
           </div>
         )}

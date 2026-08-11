@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 
 /** Filled by the active page through the outlet context, so the date controls can
  *  live in the shared header without lifting the week's state out of WeekPage.
@@ -15,9 +15,8 @@ const RAIL_LINKS = [
   { to: '/', label: 'Week' },
   { to: '/month', label: 'Month' },
   { to: '/tasks', label: 'Tasks' },
-  { to: '/template', label: 'Template' },
+  { to: '/routine', label: 'Routine' },
   { to: '/rules', label: 'Rules' },
-  { to: '/review', label: 'Review' },
 ]
 
 export default function App() {
@@ -47,7 +46,16 @@ export default function App() {
           >
             ☰
           </button>
-          <span className="shrink-0 text-lg font-bold tracking-tight">Avery</span>
+          {/* The wordmark goes home, which is the week calendar. `title` rather than
+           *  `aria-label`, so the accessible name stays the visible word "Avery"
+           *  while sighted users still get a hint that it is more than a label. */}
+          <Link
+            to="/"
+            title="Avery — go to this week"
+            className="shrink-0 text-lg font-bold tracking-tight transition-opacity hover:opacity-70"
+          >
+            Avery
+          </Link>
           {controls}
         </div>
         {isWeekOrMonth && (

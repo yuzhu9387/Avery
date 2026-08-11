@@ -14,15 +14,15 @@ OVERNIGHT_BLOCK = {
 }
 
 
-async def _template(client, blocks):
-    template_id = (await client.post("/api/templates", json={"name": "Default"})).json()["id"]
+async def _routine(client, blocks):
+    routine_id = (await client.post("/api/routines", json={"name": "Default"})).json()["id"]
     for block in blocks:
-        await client.post(f"/api/templates/{template_id}/blocks", json=block)
-    return template_id
+        await client.post(f"/api/routines/{routine_id}/blocks", json=block)
+    return routine_id
 
 
 async def test_materialize_creates_one_event_per_matching_day(client):
-    await _template(client, [WEEKDAY_BLOCK])
+    await _routine(client, [WEEKDAY_BLOCK])
     result = await client.post("/api/weeks/2026-08-03/materialize")
     assert result.status_code == 200
     assert result.json()["created"] == 5
@@ -36,7 +36,7 @@ async def test_materialize_creates_one_event_per_matching_day(client):
 
 
 async def test_overnight_block_ends_next_morning(client):
-    await _template(client, [OVERNIGHT_BLOCK])
+    await _routine(client, [OVERNIGHT_BLOCK])
     await client.post("/api/weeks/2026-08-03/materialize")
     events = (
         await client.get(
@@ -48,7 +48,7 @@ async def test_overnight_block_ends_next_morning(client):
 
 
 async def test_materialize_skips_days_that_already_have_events(client):
-    await _template(client, [WEEKDAY_BLOCK])
+    await _routine(client, [WEEKDAY_BLOCK])
     await client.post(
         "/api/events",
         json={
@@ -63,13 +63,13 @@ async def test_materialize_skips_days_that_already_have_events(client):
 
 
 async def test_materialize_is_idempotent(client):
-    await _template(client, [WEEKDAY_BLOCK])
+    await _routine(client, [WEEKDAY_BLOCK])
     assert (await client.post("/api/weeks/2026-08-03/materialize")).json()["created"] == 5
     assert (await client.post("/api/weeks/2026-08-03/materialize")).json()["created"] == 0
 
 
 async def test_materialize_reuses_one_task_across_the_week(client):
-    await _template(client, [WEEKDAY_BLOCK])
+    await _routine(client, [WEEKDAY_BLOCK])
     await client.post("/api/weeks/2026-08-03/materialize")
     events = (
         await client.get(
@@ -79,24 +79,24 @@ async def test_materialize_reuses_one_task_across_the_week(client):
     assert len({e["task_id"] for e in events}) == 1
 
 
-async def test_materialized_events_are_tagged_as_template_source(client):
-    await _template(client, [WEEKDAY_BLOCK])
+async def test_materialized_events_are_tagged_as_routine_source(client):
+    await _routine(client, [WEEKDAY_BLOCK])
     await client.post("/api/weeks/2026-08-03/materialize")
     events = (
         await client.get(
             "/api/events", params={"start": "2026-08-03T00:00:00", "end": "2026-08-10T00:00:00"}
         )
     ).json()
-    assert all(e["source"] == "template" for e in events)
-    assert all(e["template_block_id"] is not None for e in events)
+    assert all(e["source"] == "routine" for e in events)
+    assert all(e["routine_block_id"] is not None for e in events)
 
 
-async def test_materialize_without_template_returns_409(client):
+async def test_materialize_without_routine_returns_409(client):
     assert (await client.post("/api/weeks/2026-08-03/materialize")).status_code == 409
 
 
 async def test_any_date_in_the_week_resolves_to_its_monday(client):
-    await _template(client, [WEEKDAY_BLOCK])
+    await _routine(client, [WEEKDAY_BLOCK])
     # Wednesday 2026-08-05 belongs to the week starting Monday 2026-08-03.
     result = await client.post("/api/weeks/2026-08-05/materialize")
     assert result.json()["week_start"] == "2026-08-03"
@@ -111,7 +111,7 @@ async def test_untagged_block_inherits_the_task_tags(client):
     ).json()["id"]
     await client.post("/api/tasks", json={"name": "Work", "tag_ids": [tag_id]})
 
-    await _template(client, [WEEKDAY_BLOCK])  # WEEKDAY_BLOCK declares tag_ids: []
+    await _routine(client, [WEEKDAY_BLOCK])  # WEEKDAY_BLOCK declares tag_ids: []
     await client.post("/api/weeks/2026-08-03/materialize")
 
     events = (
@@ -131,7 +131,7 @@ async def test_week_is_materialized_in_a_single_commit(client, session):
 
     from app.models import Event
 
-    await _template(client, [WEEKDAY_BLOCK, OVERNIGHT_BLOCK])
+    await _routine(client, [WEEKDAY_BLOCK, OVERNIGHT_BLOCK])
 
     committed: list[int] = []
     original_commit = session.commit
@@ -173,7 +173,7 @@ async def test_spillover_event_does_not_block_materialization_but_overlap_is_rep
         "task_name": "Work",
         "tag_ids": [],
     }
-    await _template(client, [all_days_block])
+    await _routine(client, [all_days_block])
 
     # Sunday 2026-08-02 22:00 -> Monday 2026-08-03 10:00: starts before the week that
     # begins Monday 2026-08-03, but spills into it and overlaps the Monday block below.
@@ -216,18 +216,18 @@ async def test_spillover_event_does_not_block_materialization_but_overlap_is_rep
 
 
 async def test_delete_block(client):
-    template_id = await _template(client, [WEEKDAY_BLOCK])
-    blocks = (await client.get(f"/api/templates/{template_id}")).json()["blocks"]
+    routine_id = await _routine(client, [WEEKDAY_BLOCK])
+    blocks = (await client.get(f"/api/routines/{routine_id}")).json()["blocks"]
     block_id = blocks[0]["id"]
-    assert (await client.delete(f"/api/template-blocks/{block_id}")).status_code == 204
-    assert (await client.get(f"/api/templates/{template_id}")).json()["blocks"] == []
+    assert (await client.delete(f"/api/routine-blocks/{block_id}")).status_code == 204
+    assert (await client.get(f"/api/routines/{routine_id}")).json()["blocks"] == []
 
 
 async def test_block_rejects_an_unknown_tag_id(client):
     """A bad tag id on a block becomes a bad tag id on every event it materializes."""
-    template_id = (await client.post("/api/templates", json={"name": "T"})).json()["id"]
+    routine_id = (await client.post("/api/routines", json={"name": "T"})).json()["id"]
     bad = await client.post(
-        f"/api/templates/{template_id}/blocks",
+        f"/api/routines/{routine_id}/blocks",
         json={
             "days": [1],
             "start_time": "09:00:00",
@@ -239,24 +239,24 @@ async def test_block_rejects_an_unknown_tag_id(client):
     assert bad.status_code == 422
 
 
-async def test_rename_and_deactivate_a_template(client):
-    template_id = (await client.post("/api/templates", json={"name": "Old"})).json()["id"]
+async def test_rename_and_deactivate_a_routine(client):
+    routine_id = (await client.post("/api/routines", json={"name": "Old"})).json()["id"]
 
-    renamed = await client.patch(f"/api/templates/{template_id}", json={"name": "New"})
+    renamed = await client.patch(f"/api/routines/{routine_id}", json={"name": "New"})
     assert renamed.status_code == 200
     assert renamed.json()["name"] == "New"
 
-    off = await client.patch(f"/api/templates/{template_id}", json={"is_active": False})
+    off = await client.patch(f"/api/routines/{routine_id}", json={"is_active": False})
     assert off.json()["is_active"] is False
-    assert (await client.get("/api/templates/active")).status_code == 404
+    assert (await client.get("/api/routines/active")).status_code == 404
 
 
 async def test_partial_block_patch_leaves_other_fields_alone(client):
-    template_id = await _template(client, [WEEKDAY_BLOCK])
-    block = (await client.get(f"/api/templates/{template_id}")).json()["blocks"][0]
+    routine_id = await _routine(client, [WEEKDAY_BLOCK])
+    block = (await client.get(f"/api/routines/{routine_id}")).json()["blocks"][0]
 
     patched = await client.patch(
-        f"/api/template-blocks/{block['id']}", json={"task_name": "Deep work"}
+        f"/api/routine-blocks/{block['id']}", json={"task_name": "Deep work"}
     )
     assert patched.status_code == 200
     assert patched.json()["task_name"] == "Deep work"
@@ -265,10 +265,10 @@ async def test_partial_block_patch_leaves_other_fields_alone(client):
 
 
 async def test_preview_does_not_write_anything(client):
-    """The Template editor's "Preview next week" must be a pure read."""
-    await _template(client, [WEEKDAY_BLOCK])
+    """The Routine editor's "Preview next week" must be a pure read."""
+    await _routine(client, [WEEKDAY_BLOCK])
 
-    preview = await client.get("/api/templates/active/preview/2026-08-03")
+    preview = await client.get("/api/routines/active/preview/2026-08-03")
     assert preview.status_code == 200
     body = preview.json()
     assert body["week_start"] == "2026-08-03"
@@ -309,9 +309,9 @@ async def test_preview_predicts_the_tags_that_will_be_created(client):
         await client.post("/api/tags", json={"name": "Deep", "color": "#DA96A4"})
     ).json()["id"]
     await client.post("/api/tasks", json={"name": "Work", "tag_ids": [tag_id]})
-    await _template(client, [WEEKDAY_BLOCK])  # WEEKDAY_BLOCK declares tag_ids: []
+    await _routine(client, [WEEKDAY_BLOCK])  # WEEKDAY_BLOCK declares tag_ids: []
 
-    preview = (await client.get("/api/templates/active/preview/2026-08-03")).json()
+    preview = (await client.get("/api/routines/active/preview/2026-08-03")).json()
     assert preview["events"][0]["tag_ids"] == [tag_id]
 
     await client.post("/api/weeks/2026-08-03/materialize")

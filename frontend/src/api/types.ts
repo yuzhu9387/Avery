@@ -1,7 +1,7 @@
 export type Verdict = 'pass' | 'over' | 'under'
 export type TaskStatus = 'todo' | 'doing' | 'done' | 'archived'
 export type Priority = 'low' | 'normal' | 'high'
-export type EventSource = 'template' | 'manual' | 'agent'
+export type EventSource = 'routine' | 'manual' | 'agent'
 export type EventKind = 'event' | 'task'
 export type Channel = 'inapp' | 'lark' | 'both'
 
@@ -35,15 +35,15 @@ export interface AveryEvent {
   end_at: string
   tag_ids: number[]
   source: EventSource
-  template_block_id: number | null
+  routine_block_id: number | null
   notes: string
   kind: EventKind
   completed_at: string | null
 }
 
-export interface TemplateBlock {
+export interface RoutineBlock {
   id: number
-  template_id: number
+  routine_id: number
   days: number[]
   start_time: string
   end_time: string
@@ -52,12 +52,12 @@ export interface TemplateBlock {
   sort_order: number
 }
 
-export interface Template {
+export interface Routine {
   id: number
   name: string
   is_active: boolean
   created_at: string
-  blocks: TemplateBlock[]
+  blocks: RoutineBlock[]
 }
 
 export interface RuleGroup {
@@ -168,6 +168,6 @@ export interface PreviewResult {
     start_at: string
     end_at: string
     tag_ids: number[]
-    template_block_id: number
+    routine_block_id: number
   }[]
 }

@@ -15,7 +15,7 @@ from app.routers import rules as rules_router
 from app.routers import seed as seed_router
 from app.routers import tags as tags_router
 from app.routers import tasks as tasks_router
-from app.routers import templates as templates_router
+from app.routers import routines as routines_router
 from app.scheduler.jobs import shutdown_scheduler, start_scheduler
 
 
@@ -46,9 +46,9 @@ app.include_router(events_router.router)
 app.include_router(rules_router.router)
 app.include_router(reports_router.router)
 app.include_router(analytics_router.router)
-app.include_router(templates_router.router)
-app.include_router(templates_router.block_router)
-app.include_router(templates_router.week_router)
+app.include_router(routines_router.router)
+app.include_router(routines_router.block_router)
+app.include_router(routines_router.week_router)
 app.include_router(calendar_router.week_router)
 app.include_router(calendar_router.month_router)
 

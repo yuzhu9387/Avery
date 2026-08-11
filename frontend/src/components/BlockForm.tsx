@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
 
-import type { TemplateBlock } from '../api/types'
-import { DAY_LABELS, diffBlock } from '../hooks/useTemplate'
+import type { RoutineBlock } from '../api/types'
+import { DAY_LABELS, diffBlock } from '../hooks/useRoutine'
 import { useTags } from '../hooks/useTags'
 import { Field } from './Field'
 import { TagChip } from './TagChip'
@@ -23,11 +23,11 @@ export function BlockForm({
   submitting = false,
   error,
 }: {
-  block?: TemplateBlock
+  block?: RoutineBlock
   /** Days to preselect when creating (ignored when editing) — e.g. a column's
    *  "+" button seeds its own canonical day set instead of always Mon–Fri. */
   initialDays?: number[]
-  onSubmit: (body: Partial<TemplateBlock>) => void
+  onSubmit: (body: Partial<RoutineBlock>) => void
   onCancel: () => void
   submitting?: boolean
   /** Surfaced verbatim — e.g. `ApiError.detail` from a 422 for an unknown tag id. */

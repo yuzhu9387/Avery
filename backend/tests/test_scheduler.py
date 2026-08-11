@@ -11,13 +11,13 @@ WEEKDAY_BLOCK = {
 }
 
 
-async def _template(client):
-    template_id = (await client.post("/api/templates", json={"name": "Default"})).json()["id"]
-    await client.post(f"/api/templates/{template_id}/blocks", json=WEEKDAY_BLOCK)
+async def _routine(client):
+    routine_id = (await client.post("/api/routines", json={"name": "Default"})).json()["id"]
+    await client.post(f"/api/routines/{routine_id}/blocks", json=WEEKDAY_BLOCK)
 
 
 async def test_roll_next_week_targets_the_following_monday(client, session):
-    await _template(client)
+    await _routine(client)
     sunday = date(2026, 8, 2)
     result = await roll_next_week(session, sunday)
     assert result["week_start"] == "2026-08-03"
@@ -25,16 +25,16 @@ async def test_roll_next_week_targets_the_following_monday(client, session):
 
 
 async def test_roll_next_week_is_idempotent(client, session):
-    await _template(client)
+    await _routine(client)
     sunday = date(2026, 8, 2)
     assert (await roll_next_week(session, sunday))["created"] == 5
     assert (await roll_next_week(session, sunday))["created"] == 0
 
 
-async def test_roll_next_week_without_template_reports_zero(client, session):
+async def test_roll_next_week_without_routine_reports_zero(client, session):
     result = await roll_next_week(session, date(2026, 8, 2))
     assert result["created"] == 0
-    assert result["skipped_reason"] == "no active template"
+    assert result["skipped_reason"] == "no active routine"
 
 
 async def test_double_start_returns_the_same_scheduler():

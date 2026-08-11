@@ -3,22 +3,22 @@ from datetime import date, datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Event, Task, Template, TemplateBlock
+from app.models import Event, Task, Routine, RoutineBlock
 from app.models.event import EventSource
 from app.models.task import TaskStatus
-from app.schemas.template import (
-    TemplateBlockCreate,
-    TemplateBlockUpdate,
-    TemplateCreate,
-    TemplateUpdate,
+from app.schemas.routine import (
+    RoutineBlockCreate,
+    RoutineBlockUpdate,
+    RoutineCreate,
+    RoutineUpdate,
 )
 from app.services import events as event_service
 from app.services import tags as tag_service
 from app.services import tasks as task_service
 
 
-class NoActiveTemplate(Exception):
-    """Raised when materialization is requested but no active template exists."""
+class NoActiveRoutine(Exception):
+    """Raised when materialization is requested but no active routine exists."""
 
 
 def week_bounds(any_day: date) -> tuple[date, date]:
@@ -27,68 +27,68 @@ def week_bounds(any_day: date) -> tuple[date, date]:
     return monday, monday + timedelta(days=7)
 
 
-async def list_templates(session: AsyncSession) -> list[Template]:
-    stmt = select(Template).order_by(Template.id)
+async def list_routines(session: AsyncSession) -> list[Routine]:
+    stmt = select(Routine).order_by(Routine.id)
     return list((await session.scalars(stmt)).all())
 
 
-async def get_template(session: AsyncSession, template_id: int) -> Template | None:
-    # populate_existing re-runs the selectin load of `blocks`. Without it, a Template
+async def get_routine(session: AsyncSession, routine_id: int) -> Routine | None:
+    # populate_existing re-runs the selectin load of `blocks`. Without it, a Routine
     # already in the identity map returns a stale block list after an add or delete.
     stmt = (
-        select(Template)
-        .where(Template.id == template_id)
+        select(Routine)
+        .where(Routine.id == routine_id)
         .execution_options(populate_existing=True)
     )
     return (await session.scalars(stmt)).first()
 
 
-async def get_active_template(session: AsyncSession) -> Template | None:
+async def get_active_routine(session: AsyncSession) -> Routine | None:
     stmt = (
-        select(Template)
-        .where(Template.is_active.is_(True))
-        .order_by(Template.id.desc())
+        select(Routine)
+        .where(Routine.is_active.is_(True))
+        .order_by(Routine.id.desc())
         .execution_options(populate_existing=True)
     )
     return (await session.scalars(stmt)).first()
 
 
-async def create_template(session: AsyncSession, data: TemplateCreate) -> Template:
-    template = Template(**data.model_dump())
-    session.add(template)
+async def create_routine(session: AsyncSession, data: RoutineCreate) -> Routine:
+    routine = Routine(**data.model_dump())
+    session.add(routine)
     await session.commit()
-    await session.refresh(template)
-    return template
+    await session.refresh(routine)
+    return routine
 
 
-async def update_template(
-    session: AsyncSession, template_id: int, data: TemplateUpdate
-) -> Template | None:
-    template = await session.get(Template, template_id)
-    if template is None:
+async def update_routine(
+    session: AsyncSession, routine_id: int, data: RoutineUpdate
+) -> Routine | None:
+    routine = await session.get(Routine, routine_id)
+    if routine is None:
         return None
     for key, value in data.model_dump(exclude_unset=True).items():
-        setattr(template, key, value)
+        setattr(routine, key, value)
     await session.commit()
-    return await get_template(session, template_id)
+    return await get_routine(session, routine_id)
 
 
-async def delete_template(session: AsyncSession, template_id: int) -> bool:
-    template = await session.get(Template, template_id)
-    if template is None:
+async def delete_routine(session: AsyncSession, routine_id: int) -> bool:
+    routine = await session.get(Routine, routine_id)
+    if routine is None:
         return False
-    await session.delete(template)
+    await session.delete(routine)
     await session.commit()
     return True
 
 
 async def create_block(
-    session: AsyncSession, template_id: int, data: TemplateBlockCreate
-) -> TemplateBlock | None:
-    if await session.get(Template, template_id) is None:
+    session: AsyncSession, routine_id: int, data: RoutineBlockCreate
+) -> RoutineBlock | None:
+    if await session.get(Routine, routine_id) is None:
         return None
     await tag_service.assert_tags_exist(session, data.tag_ids)
-    block = TemplateBlock(template_id=template_id, **data.model_dump())
+    block = RoutineBlock(routine_id=routine_id, **data.model_dump())
     session.add(block)
     await session.commit()
     await session.refresh(block)
@@ -96,9 +96,9 @@ async def create_block(
 
 
 async def update_block(
-    session: AsyncSession, block_id: int, data: TemplateBlockUpdate
-) -> TemplateBlock | None:
-    block = await session.get(TemplateBlock, block_id)
+    session: AsyncSession, block_id: int, data: RoutineBlockUpdate
+) -> RoutineBlock | None:
+    block = await session.get(RoutineBlock, block_id)
     if block is None:
         return None
     fields = data.model_dump(exclude_unset=True)
@@ -112,7 +112,7 @@ async def update_block(
 
 
 async def delete_block(session: AsyncSession, block_id: int) -> bool:
-    block = await session.get(TemplateBlock, block_id)
+    block = await session.get(RoutineBlock, block_id)
     if block is None:
         return False
     await session.delete(block)
@@ -129,7 +129,7 @@ async def _days_with_events(session: AsyncSession, monday: date, next_monday: da
     and silently dropped Monday's eight blocks from every week after the first.
 
     The cost of this choice is that a long manual event spilling past midnight can now
-    have template blocks materialized over it, producing an overlap. Overlaps are a
+    have routine blocks materialized over it, producing an overlap. Overlaps are a
     condition this system already detects (`Evaluation.overlaps`) and the Review page
     warns about, so they are visible and fixable. Silent loss is neither. This also makes
     the rule agree with `get_week`'s gate instead of contradicting it.
@@ -145,7 +145,7 @@ async def _days_with_events(session: AsyncSession, monday: date, next_monday: da
 
 
 async def preview_week(
-    session: AsyncSession, any_day: date, template: Template | None = None
+    session: AsyncSession, any_day: date, routine: Routine | None = None
 ) -> tuple[date, list[dict]] | None:
     """What materialize_week WOULD create, without writing anything.
 
@@ -153,9 +153,9 @@ async def preview_week(
     materialize_week rather than reimplementing it — a preview that disagrees with what
     actually gets created is worse than no preview.
     """
-    if template is None:
-        template = await get_active_template(session)
-    if template is None:
+    if routine is None:
+        routine = await get_active_routine(session)
+    if routine is None:
         return None
 
     monday, next_monday = week_bounds(any_day)
@@ -167,7 +167,7 @@ async def preview_week(
     # Archived tasks are skipped for the same reason find_or_create_by_name skips them.
     task_tags: dict[str, list[int]] = {}
 
-    async def tags_for(block: TemplateBlock) -> list[int]:
+    async def tags_for(block: RoutineBlock) -> list[int]:
         if block.tag_ids:
             return list(block.tag_ids)
         if block.task_name not in task_tags:
@@ -186,7 +186,7 @@ async def preview_week(
         day = monday + timedelta(days=offset)
         if day in occupied:
             continue
-        for block in template.blocks:
+        for block in routine.blocks:
             if day.isoweekday() not in block.days:
                 continue
             start = datetime.combine(day, block.start_time)
@@ -199,7 +199,7 @@ async def preview_week(
                     "start_at": start.isoformat(timespec="seconds"),
                     "end_at": end.isoformat(timespec="seconds"),
                     "tag_ids": await tags_for(block),
-                    "template_block_id": block.id,
+                    "routine_block_id": block.id,
                 }
             )
     rows.sort(key=lambda r: r["start_at"])
@@ -207,9 +207,9 @@ async def preview_week(
 
 
 async def materialize_week(
-    session: AsyncSession, any_day: date, template: Template | None = None
+    session: AsyncSession, any_day: date, routine: Routine | None = None
 ) -> tuple[date, list[Event], list[date]]:
-    """Create template events for the week containing `any_day`.
+    """Create routine events for the week containing `any_day`.
 
     Days that already hold any event are skipped entirely, so materialization never
     merges into a day the user has already touched, and a re-run is a no-op.
@@ -220,21 +220,21 @@ async def materialize_week(
     missing its remaining blocks. Task 13 runs this unattended from cron, so that
     failure mode has to be impossible rather than merely unlikely.
     """
-    if template is None:
-        template = await get_active_template(session)
-    if template is None:
-        raise NoActiveTemplate()
+    if routine is None:
+        routine = await get_active_routine(session)
+    if routine is None:
+        raise NoActiveRoutine()
 
     monday, next_monday = week_bounds(any_day)
     occupied = await _days_with_events(session, monday, next_monday)
     skipped = sorted(occupied)
 
-    wanted: list[tuple[date, TemplateBlock]] = []
+    wanted: list[tuple[date, RoutineBlock]] = []
     for offset in range(7):
         day = monday + timedelta(days=offset)
         if day in occupied:
             continue
-        for block in template.blocks:
+        for block in routine.blocks:
             if day.isoweekday() in block.days:
                 wanted.append((day, block))
 
@@ -264,8 +264,8 @@ async def materialize_week(
             # lost, and an untagged event falls into "unassigned" — silently absent
             # from every 6:3:1 ratio rather than visibly wrong.
             tag_ids=list(block.tag_ids) or list(task.tag_ids),
-            source=EventSource.TEMPLATE,
-            template_block_id=block.id,
+            source=EventSource.ROUTINE,
+            routine_block_id=block.id,
         )
         session.add(event)
         created.append(event)

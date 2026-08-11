@@ -4,20 +4,20 @@ import type { QueryClient } from '@tanstack/react-query'
 import { ApiError } from '../api/client'
 import {
   createBlock,
-  createTemplate,
+  createRoutine,
   deleteBlock,
-  getActiveTemplate,
+  getActiveRoutine,
   previewWeek,
   updateBlock,
-  updateTemplate,
-} from '../api/templates'
+  updateRoutine,
+} from '../api/routines'
 import { qk } from '../api/keys'
-import type { Template, TemplateBlock } from '../api/types'
+import type { Routine, RoutineBlock } from '../api/types'
 
 export type ColumnKey = 'everyday' | 'weekday' | 'saturday' | 'sunday' | 'custom'
 
 /** Monday-first, matching the `days` domain (1 = Monday .. 7 = Sunday) used
- *  everywhere else in the template model. */
+ *  everywhere else in the routine model. */
 export const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
 const EVERYDAY = [1, 2, 3, 4, 5, 6, 7]
@@ -31,7 +31,7 @@ function daysEqualUnordered(a: number[], b: number[]): boolean {
 }
 
 /**
- * Classifies a block into the column that mirrors the paper template's layout.
+ * Classifies a block into the column that mirrors the paper routine's layout.
  *
  * Matches are **exact**, never by superset. The seeded overnight Rest block
  * runs `days = [1..7]` — every night, including Saturday and Sunday. An
@@ -71,7 +71,7 @@ export function formatDaySet(days: number[]): string {
  *  design, and sending untouched fields back would just be noise (or, for a
  *  field the user never touched, a false signal that it was deliberately set). */
 export function diffBlock(
-  original: TemplateBlock,
+  original: RoutineBlock,
   next: {
     days: number[]
     start_time: string
@@ -79,8 +79,8 @@ export function diffBlock(
     task_name: string
     tag_ids: number[]
   },
-): Partial<TemplateBlock> {
-  const patch: Partial<TemplateBlock> = {}
+): Partial<RoutineBlock> {
+  const patch: Partial<RoutineBlock> = {}
   if (!daysEqualUnordered(next.days, original.days)) patch.days = next.days
   if (next.start_time !== original.start_time) patch.start_time = next.start_time
   if (next.end_time !== original.end_time) patch.end_time = next.end_time
@@ -89,11 +89,11 @@ export function diffBlock(
   return patch
 }
 
-export function useActiveTemplate() {
+export function useActiveRoutine() {
   return useQuery({
-    queryKey: qk.activeTemplate,
-    queryFn: getActiveTemplate,
-    // Same reasoning as useActiveRule: a 404 means "no active template configured",
+    queryKey: qk.activeRoutine,
+    queryFn: getActiveRoutine,
+    // Same reasoning as useActiveRule: a 404 means "no active routine configured",
     // a normal and common state, not a flaky request worth retrying three times.
     retry: (count, error) => !(error instanceof ApiError && error.status === 404) && count < 3,
   })
@@ -101,47 +101,47 @@ export function useActiveTemplate() {
 
 /** A block mutation can change what any future, not-yet-materialized week looks
  *  like, and rule evaluation reads through events — so the week grid and the
- *  ratio rail both need their caches dropped alongside the template itself. */
-function invalidateTemplateEffects(queryClient: QueryClient) {
-  queryClient.invalidateQueries({ queryKey: ['template'] })
+ *  ratio rail both need their caches dropped alongside the routine itself. */
+function invalidateRoutineEffects(queryClient: QueryClient) {
+  queryClient.invalidateQueries({ queryKey: ['routine'] })
   queryClient.invalidateQueries({ queryKey: ['week'] })
   queryClient.invalidateQueries({ queryKey: ['evaluate'] })
 }
 
 /** Recovers from the empty state: a database that never ran /api/seed, or one whose
- *  active template was deleted, has nowhere to click "New block" — there is no
- *  template to attach it to. This creates a bare active template so the editor has
+ *  active routine was deleted, has nowhere to click "New block" — there is no
+ *  routine to attach it to. This creates a bare active routine so the editor has
  *  something to build on. */
-export function useCreateTemplate() {
+export function useCreateRoutine() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (body: Partial<Template>) => createTemplate(body),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['template'] }),
+    mutationFn: (body: Partial<Routine>) => createRoutine(body),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['routine'] }),
   })
 }
 
-export function useUpdateTemplate() {
+export function useUpdateRoutine() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ id, body }: { id: number; body: Partial<Template> }) => updateTemplate(id, body),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['template'] }),
+    mutationFn: ({ id, body }: { id: number; body: Partial<Routine> }) => updateRoutine(id, body),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['routine'] }),
   })
 }
 
 export function useCreateBlock() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ templateId, body }: { templateId: number; body: Partial<TemplateBlock> }) =>
-      createBlock(templateId, body),
-    onSuccess: () => invalidateTemplateEffects(queryClient),
+    mutationFn: ({ routineId, body }: { routineId: number; body: Partial<RoutineBlock> }) =>
+      createBlock(routineId, body),
+    onSuccess: () => invalidateRoutineEffects(queryClient),
   })
 }
 
 export function useUpdateBlock() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ id, body }: { id: number; body: Partial<TemplateBlock> }) => updateBlock(id, body),
-    onSuccess: () => invalidateTemplateEffects(queryClient),
+    mutationFn: ({ id, body }: { id: number; body: Partial<RoutineBlock> }) => updateBlock(id, body),
+    onSuccess: () => invalidateRoutineEffects(queryClient),
   })
 }
 
@@ -149,7 +149,7 @@ export function useDeleteBlock() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (id: number) => deleteBlock(id),
-    onSuccess: () => invalidateTemplateEffects(queryClient),
+    onSuccess: () => invalidateRoutineEffects(queryClient),
   })
 }
 

@@ -4,9 +4,9 @@ from app.models.report import Report
 from app.models.rule import Rule
 from app.models.tag import Tag
 from app.models.task import Priority, Task, TaskStatus
-from app.models.template import Template, TemplateBlock
+from app.models.routine import Routine, RoutineBlock
 
 __all__ = [
     "Tag", "Task", "TaskStatus", "Priority", "Event", "EventSource",
-    "Rule", "Template", "TemplateBlock", "Report", "Reminder", "Channel",
+    "Rule", "Routine", "RoutineBlock", "Report", "Reminder", "Channel",
 ]

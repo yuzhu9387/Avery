@@ -65,17 +65,17 @@ async def test_tag_in_use_by_task_refuses_deletion(client):
     assert (await client.get(f"/api/tags/{tag['id']}")).status_code == 200
 
 
-async def test_tag_in_use_by_template_block_refuses_deletion(client):
-    tag = await _tag(client, name="TemplateTag")
-    template = (
+async def test_tag_in_use_by_routine_block_refuses_deletion(client):
+    tag = await _tag(client, name="RoutineTag")
+    routine = (
         await client.post(
-            "/api/templates",
-            json={"name": "A template"},
+            "/api/routines",
+            json={"name": "A routine"},
         )
     ).json()
     block = (
         await client.post(
-            f"/api/templates/{template['id']}/blocks",
+            f"/api/routines/{routine['id']}/blocks",
             json={
                 "task_name": "Block",
                 "days": [1, 2],
@@ -87,7 +87,7 @@ async def test_tag_in_use_by_template_block_refuses_deletion(client):
     ).json()
     refused = await client.delete(f"/api/tags/{tag['id']}")
     assert refused.status_code == 409
-    assert "template block" in refused.json()["detail"]
+    assert "routine block" in refused.json()["detail"]
     assert (await client.get(f"/api/tags/{tag['id']}")).status_code == 200
 
 

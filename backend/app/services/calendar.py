@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Event
 from app.services import events as event_service
-from app.services import templates as template_service
+from app.services import routines as routine_service
 from app.services.analytics import EventSlice, split_minutes_by_day
 
 
@@ -19,7 +19,7 @@ def _is_materializable(monday: date) -> bool:
 async def get_week(
     session: AsyncSession, any_day: date, allow_materialize: bool = True
 ) -> dict:
-    monday, next_monday = template_service.week_bounds(any_day)
+    monday, next_monday = routine_service.week_bounds(any_day)
     start = datetime.combine(monday, datetime.min.time())
     end = datetime.combine(next_monday, datetime.min.time())
 
@@ -32,12 +32,12 @@ async def get_week(
 
     if not starts_here and allow_materialize and _is_materializable(monday):
         try:
-            _, created, _ = await template_service.materialize_week(session, monday)
-        except template_service.NoActiveTemplate:
+            _, created, _ = await routine_service.materialize_week(session, monday)
+        except routine_service.NoActiveRoutine:
             pass
         else:
             # `materialized` must mean "events were created", not merely "no exception
-            # was raised". A template with no blocks matching this week legitimately
+            # was raised". A routine with no blocks matching this week legitimately
             # creates nothing, and reporting true there tells the UI a lie.
             materialized = bool(created)
             if created:
