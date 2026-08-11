@@ -8,6 +8,7 @@ import { qk } from '../api/keys'
 import { listTasks } from '../api/tasks'
 import { materializeWeek } from '../api/templates'
 import type { AveryEvent, Task } from '../api/types'
+import { CategoryRail } from '../components/CategoryRail'
 import { Confetti, type Burst } from '../components/Confetti'
 import { QuickCreatePopover } from '../components/QuickCreatePopover'
 import { RatioBars } from '../components/RatioBars'
@@ -16,9 +17,11 @@ import { useEventDrag } from '../hooks/useEventDrag'
 import { useEventMutations } from '../hooks/useEventMutations'
 import { useGridZoom } from '../hooks/useGridZoom'
 import { useTagMap, useTags } from '../hooks/useTags'
+import { useTagVisibility } from '../hooks/useTagVisibility'
 import { useWeek, useWeekRatios } from '../hooks/useWeek'
 import { addDays, formatDate, mondayOf } from '../lib/datetime'
 import { minutesToPx } from '../lib/geometry'
+import { isEventVisible } from '../lib/tagVisibility'
 
 const NAV_BUTTON = 'rounded-[8px] px-3 py-1.5 text-sm text-ink-muted transition-colors hover:bg-[var(--pale)]/50 hover:text-ink'
 
@@ -44,6 +47,7 @@ export default function WeekPage() {
   const ratios = useWeekRatios(monday, week.isSuccess)
   const tagMap = useTagMap()
   const tags = useTags()
+  const { hidden, toggle } = useTagVisibility()
   const { create, complete, uncomplete } = useEventMutations()
   const [slot, setSlot] = useState<SlotClick | null>(null)
 
@@ -113,6 +117,10 @@ export default function WeekPage() {
   })
 
   const events = week.data?.events ?? []
+  const visibleEvents = useMemo(
+    () => events.filter((e) => isEventVisible(e.tag_ids, hidden)),
+    [events, hidden],
+  )
   const isPastWeek = monday.getTime() < mondayOf(new Date()).getTime()
   const isEmptyPastWeek = isPastWeek && week.isSuccess && events.length === 0
 
@@ -136,6 +144,17 @@ export default function WeekPage() {
         {ratios.data && (
           <RatioBars groups={ratios.data.metrics.groups} tolerance={ratios.data.rule.tolerance} compact />
         )}
+
+        <h2 className="mb-3 mt-6 text-xs font-bold uppercase tracking-wide text-ink-faint">
+          Categories
+        </h2>
+        <CategoryRail
+          tags={(tags.data ?? []).filter((t) => !t.archived)}
+          minutesByTag={ratios.data?.metrics.minutes_by_primary_tag ?? {}}
+          totalMinutes={ratios.data?.metrics.total_minutes ?? 0}
+          hidden={hidden}
+          onToggle={toggle}
+        />
       </aside>
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -197,7 +216,7 @@ export default function WeekPage() {
           {week.isSuccess && (
             <WeekGrid
               weekStart={monday}
-              events={events}
+              events={visibleEvents}
               tagMap={tagMap}
               taskMap={taskMap}
               onOpen={onOpen}
