@@ -1,15 +1,18 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useNavigate } from 'react-router-dom'
 
 import { ApiError } from '../api/client'
 import { invalidateCalendar } from '../api/invalidate'
 import { qk } from '../api/keys'
 import { listTasks } from '../api/tasks'
 import { materializeWeek } from '../api/templates'
-import type { Task } from '../api/types'
+import type { AveryEvent, Task } from '../api/types'
+import { Confetti, type Burst } from '../components/Confetti'
 import { RatioBars } from '../components/RatioBars'
 import { WeekGrid } from '../components/WeekGrid'
 import { useEventDrag } from '../hooks/useEventDrag'
+import { useEventMutations } from '../hooks/useEventMutations'
 import { useGridZoom } from '../hooks/useGridZoom'
 import { useTagMap } from '../hooks/useTags'
 import { useWeek, useWeekRatios } from '../hooks/useWeek'
@@ -30,6 +33,7 @@ function rangeLabel(monday: Date): string {
 }
 
 export default function WeekPage() {
+  const navigate = useNavigate()
   const [monday, setMonday] = useState(() => mondayOf(new Date()))
   const day = formatDate(monday)
 
@@ -38,7 +42,7 @@ export default function WeekPage() {
   // firing this in parallel can cache a false "0 minutes" snapshot.
   const ratios = useWeekRatios(monday, week.isSuccess)
   const tagMap = useTagMap()
-  const { draft, onPointerDownMove, onPointerDownResize } = useEventDrag()
+  const { complete, uncomplete } = useEventMutations()
 
   // A callback ref (via state) rather than a plain useRef: the grid only mounts once
   // `week.isSuccess` (see the conditional render below), so on a cold load a plain
@@ -49,6 +53,24 @@ export default function WeekPage() {
   const [gridEl, setGridEl] = useState<HTMLDivElement | null>(null)
   const scrolledOnce = useRef(false)
   const { pxPerHour, columnPx } = useGridZoom(gridEl)
+  const { draft, beginMove, onPointerDownResize } = useEventDrag(pxPerHour)
+  const [burst, setBurst] = useState<Burst | null>(null)
+  const clearBurst = useCallback(() => setBurst(null), [])
+
+  const onOpen = useCallback((event: AveryEvent) => navigate(`/events/${event.id}`), [navigate])
+
+  const onToggleComplete = useCallback(
+    (event: AveryEvent, point: { x: number; y: number }) => {
+      if (event.completed_at) {
+        uncomplete.mutate(event.id)
+        return
+      }
+      complete.mutate(event.id)
+      // Only on completion. Reopening a card is a correction, not an achievement.
+      setBurst({ id: Date.now(), x: point.x, y: point.y })
+    },
+    [complete, uncomplete],
+  )
 
   // Open on waking hours. Without this the full-day grid opens on six empty rows.
   useEffect(() => {
@@ -160,6 +182,12 @@ export default function WeekPage() {
           </div>
         )}
 
+        {(complete.isError || uncomplete.isError) && (
+          <div className="border-b border-line px-4 py-2 text-xs" style={{ color: 'var(--over)' }}>
+            Couldn't update that card. It's still as it was.
+          </div>
+        )}
+
         <div className="min-h-0 flex-1">
           {week.isLoading && <p className="p-4 text-sm text-ink-faint">Loading week…</p>}
           {week.isError && <p className="p-4 text-sm text-ink-faint">Couldn't load this week.</p>}
@@ -169,7 +197,9 @@ export default function WeekPage() {
               events={events}
               tagMap={tagMap}
               taskMap={taskMap}
-              onEventPointerDown={onPointerDownMove}
+              onOpen={onOpen}
+              onToggleComplete={onToggleComplete}
+              onDragStart={beginMove}
               onEventPointerDownResize={onPointerDownResize}
               draft={draft}
               scrollRef={setGridEl}
@@ -179,6 +209,7 @@ export default function WeekPage() {
           )}
         </div>
       </div>
+      <Confetti burst={burst} onDone={clearBurst} />
     </div>
   )
 }

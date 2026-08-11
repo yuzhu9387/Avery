@@ -1,5 +1,9 @@
+import { useCallback } from 'react'
+
 import type { AveryEvent, Tag, Task } from '../api/types'
 import type { DragDraft } from '../hooks/useEventDrag'
+import type { GestureOrigin } from '../hooks/useCardGestures'
+import { useCardGestures } from '../hooks/useCardGestures'
 import { addDays, formatDate, parseLocal } from '../lib/datetime'
 import {
   GRID,
@@ -10,10 +14,80 @@ import {
   segmentsForEvent,
   type Segment,
 } from '../lib/geometry'
-import { EventCard } from './EventCard'
+import { CARD_RIGHT_GUTTER_PX, EventCard } from './EventCard'
 
 const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 const GUTTER_PX = 56
+
+/** One card plus its resize handles. A real component, not a function called in a
+ *  loop — `useCardGestures` is a hook, and hooks cannot be called inside `map`. */
+function GridCard({
+  event,
+  segment,
+  tag,
+  title,
+  isDragging,
+  dragOffset,
+  onOpen,
+  onToggleComplete,
+  onDragStart,
+  onPointerDownResize,
+}: {
+  event: AveryEvent
+  segment: Segment
+  tag: Tag | undefined
+  title: string
+  isDragging: boolean
+  dragOffset?: { dx: number; dy: number }
+  onOpen: (event: AveryEvent) => void
+  onToggleComplete: (event: AveryEvent, point: { x: number; y: number }) => void
+  onDragStart: (event: AveryEvent, origin: GestureOrigin) => void
+  onPointerDownResize?: (e: React.PointerEvent, edge: 'start' | 'end') => void
+}) {
+  const { onPointerDown } = useCardGestures({
+    onOpen: useCallback(() => onOpen(event), [onOpen, event]),
+    onToggleComplete: useCallback((p) => onToggleComplete(event, p), [onToggleComplete, event]),
+    onDragStart: useCallback((o) => onDragStart(event, o), [onDragStart, event]),
+  })
+
+  return (
+    <div className="contents">
+      <EventCard
+        event={event}
+        segment={segment}
+        tag={tag}
+        title={title}
+        onPointerDown={onPointerDown}
+        isDragging={isDragging}
+        dragOffset={dragOffset}
+      />
+      {onPointerDownResize && segment.isStart && (
+        <div
+          className="absolute z-10 h-1.5 cursor-ns-resize"
+          style={{ top: segment.topPx, left: 2, right: CARD_RIGHT_GUTTER_PX }}
+          onPointerDown={(e) => {
+            e.stopPropagation()
+            onPointerDownResize(e, 'start')
+          }}
+        />
+      )}
+      {onPointerDownResize && segment.isEnd && (
+        <div
+          className="absolute z-10 h-1.5 cursor-ns-resize"
+          style={{
+            top: segment.topPx + segment.heightPx - 6,
+            left: 2,
+            right: CARD_RIGHT_GUTTER_PX,
+          }}
+          onPointerDown={(e) => {
+            e.stopPropagation()
+            onPointerDownResize(e, 'end')
+          }}
+        />
+      )}
+    </div>
+  )
+}
 
 /** "6" -> "6 AM", "13" -> "1 PM", "24" (midnight, the grid's floor label for the next
  *  day) -> "12 AM". */
@@ -29,10 +103,10 @@ export function WeekGrid({
   events,
   tagMap,
   taskMap,
-  onEventPointerDown,
-  // Not yet rendered — Task 11 re-attaches resize handles as siblings of EventCard
-  // and wires this through. Kept in the props type so callers can pass it now.
-  onEventPointerDownResize: _onEventPointerDownResize,
+  onOpen,
+  onToggleComplete,
+  onDragStart,
+  onEventPointerDownResize,
   draft,
   pxPerHour,
   columnPx,
@@ -42,10 +116,15 @@ export function WeekGrid({
   events: AveryEvent[]
   tagMap: Map<number, Tag>
   taskMap: Map<number, Task>
-  onEventPointerDown?: (event: AveryEvent, segment: Segment) => (e: React.PointerEvent) => void
+  /** Opens the detail page for a card after a single, un-repeated press. */
+  onOpen: (event: AveryEvent) => void
+  /** Toggles completion; `point` is the viewport coordinate the confetti burst
+   *  should originate from. */
+  onToggleComplete: (event: AveryEvent, point: { x: number; y: number }) => void
+  /** A press held past the long-press threshold — the card has lifted into a drag. */
+  onDragStart: (event: AveryEvent, origin: GestureOrigin) => void
   onEventPointerDownResize?: (
     event: AveryEvent,
-    segment: Segment,
   ) => (e: React.PointerEvent, edge: 'start' | 'end') => void
   /** The event mid-drag, if any, and its live pixel offset. */
   draft?: DragDraft | null
@@ -201,15 +280,18 @@ export function WeekGrid({
                 }
 
                 return (
-                  <EventCard
+                  <GridCard
                     key={`${event.id}-${segment.dayIndex}`}
                     event={event}
                     segment={renderSegment}
                     tag={tagMap.get(event.tag_ids[0])}
                     title={taskMap.get(event.task_id)?.name ?? `Task #${event.task_id}`}
-                    onPointerDown={onEventPointerDown?.(event, segment)}
                     isDragging={isDragging}
                     dragOffset={dragOffset}
+                    onOpen={onOpen}
+                    onToggleComplete={onToggleComplete}
+                    onDragStart={onDragStart}
+                    onPointerDownResize={onEventPointerDownResize?.(event)}
                   />
                 )
               })}

@@ -4,9 +4,9 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { moveEvent, updateEvent } from '../api/events'
 import { invalidateCalendar } from '../api/invalidate'
 import type { AveryEvent } from '../api/types'
+import type { GestureOrigin } from './useCardGestures'
 import { resolveDrag } from '../lib/drag'
-import { GRID, pxToMinutes } from '../lib/geometry'
-import type { Segment } from '../lib/geometry'
+import { pxToMinutes } from '../lib/geometry'
 
 /** A live pointer offset for whichever event is mid-drag. Purely visual — the
  *  authoritative bounds only change once the pointer lifts and the mutation lands. */
@@ -25,8 +25,11 @@ export interface DragDraft {
  * without refetching. The mutation only fires once, on pointer-up, after
  * `resolveDrag` turns the gesture into a request — or decides nothing moved, in
  * which case this does nothing and the gesture reads as a click.
+ *
+ * Takes `pxPerHour` rather than reading `GRID.basePxPerHour` directly so drag math
+ * stays correct at any zoom level.
  */
-export function useEventDrag() {
+export function useEventDrag(pxPerHour: number) {
   const queryClient = useQueryClient()
   const [draft, setDraft] = useState<DragDraft | null>(null)
 
@@ -44,80 +47,98 @@ export function useEventDrag() {
     onSettled: settle,
   })
 
-  const onPointerDownMove = useCallback(
-    (event: AveryEvent, _segment: Segment) => (e: React.PointerEvent) => {
-      const el = e.currentTarget as HTMLElement
-      // Measured, not assumed: the day column is this block's parent, and reading
-      // its width here (rather than hardcoding one) keeps deltaDays correct across
-      // window resizes.
+  const beginMove = useCallback(
+    (event: AveryEvent, origin: GestureOrigin) => {
+      const el = origin.el
+      // Measured, not assumed: the day column is this card's parent, and reading its
+      // width here keeps deltaDays correct across window resizes and zoom changes.
       const columnWidth = el.parentElement?.getBoundingClientRect().width ?? 0
-      const originX = e.clientX
-      const originY = e.clientY
+      const originX = origin.clientX
+      const originY = origin.clientY
 
-      // Pointer capture lets this element keep receiving move/up events even once
-      // the cursor leaves the block's bounds.
-      el.setPointerCapture(e.pointerId)
+      // Pointer capture lets this element keep receiving move/up events once the
+      // cursor leaves the card's bounds.
+      el.setPointerCapture(origin.pointerId)
       setDraft({ eventId: event.id, kind: 'move', dx: 0, dy: 0 })
 
       const handleMove = (ev: PointerEvent) => {
-        setDraft({
-          eventId: event.id,
-          kind: 'move',
-          dx: ev.clientX - originX,
-          dy: ev.clientY - originY,
-        })
+        setDraft({ eventId: event.id, kind: 'move', dx: ev.clientX - originX, dy: ev.clientY - originY })
+      }
+
+      const finish = () => {
+        el.removeEventListener('pointermove', handleMove)
+        el.removeEventListener('pointerup', handleUp)
+        el.removeEventListener('pointercancel', handleCancel)
+        try {
+          el.releasePointerCapture(origin.pointerId)
+        } catch {
+          // The pointer is already gone on a cancel; releasing it again is not an error.
+        }
+        setDraft(null)
       }
 
       const handleUp = (ev: PointerEvent) => {
-        el.removeEventListener('pointermove', handleMove)
-        el.removeEventListener('pointerup', handleUp)
-        el.releasePointerCapture(e.pointerId)
-        setDraft(null)
-
-        const deltaMinutes = pxToMinutes(ev.clientY - originY, GRID.basePxPerHour)
+        const deltaMinutes = pxToMinutes(ev.clientY - originY, pxPerHour)
         const deltaDays = columnWidth > 0 ? Math.round((ev.clientX - originX) / columnWidth) : 0
+        finish()
         const plan = resolveDrag(event, { kind: 'move', deltaMinutes, deltaDays })
-        // A sub-snap delta resolves to null — that is a click, not a zero-delta move.
         if (!plan || plan.kind !== 'move') return
         move.mutate({ id: event.id, start_at: plan.start_at })
       }
 
+      // A cancelled gesture must clear the draft. Without this the card stays drawn at
+      // a time it does not occupy until the next render.
+      const handleCancel = () => finish()
+
       el.addEventListener('pointermove', handleMove)
       el.addEventListener('pointerup', handleUp, { once: true })
+      el.addEventListener('pointercancel', handleCancel, { once: true })
     },
-    [move],
+    [move, pxPerHour],
   )
 
   const onPointerDownResize = useCallback(
-    (event: AveryEvent, _segment: Segment) =>
-      (e: React.PointerEvent, edge: 'start' | 'end') => {
-        const el = e.currentTarget as HTMLElement
-        const originY = e.clientY
+    (event: AveryEvent) => (e: React.PointerEvent, edge: 'start' | 'end') => {
+      const el = e.currentTarget as HTMLElement
+      const originY = e.clientY
+      const pointerId = e.pointerId
 
-        el.setPointerCapture(e.pointerId)
-        setDraft({ eventId: event.id, kind: 'resize', edge, dx: 0, dy: 0 })
+      el.setPointerCapture(pointerId)
+      setDraft({ eventId: event.id, kind: 'resize', edge, dx: 0, dy: 0 })
 
-        const handleMove = (ev: PointerEvent) => {
-          setDraft({ eventId: event.id, kind: 'resize', edge, dx: 0, dy: ev.clientY - originY })
+      const handleMove = (ev: PointerEvent) => {
+        setDraft({ eventId: event.id, kind: 'resize', edge, dx: 0, dy: ev.clientY - originY })
+      }
+
+      const finish = () => {
+        el.removeEventListener('pointermove', handleMove)
+        el.removeEventListener('pointerup', handleUp)
+        el.removeEventListener('pointercancel', handleCancel)
+        try {
+          el.releasePointerCapture(pointerId)
+        } catch {
+          // The pointer is already gone on a cancel; releasing it again is not an error.
         }
+        setDraft(null)
+      }
 
-        const handleUp = (ev: PointerEvent) => {
-          el.removeEventListener('pointermove', handleMove)
-          el.removeEventListener('pointerup', handleUp)
-          el.releasePointerCapture(e.pointerId)
-          setDraft(null)
+      const handleUp = (ev: PointerEvent) => {
+        const deltaMinutes = pxToMinutes(ev.clientY - originY, pxPerHour)
+        finish()
+        const plan = resolveDrag(event, { kind: 'resize', edge, deltaMinutes })
+        if (!plan || plan.kind !== 'patch') return
+        patch.mutate({ id: event.id, body: plan.body })
+      }
 
-          const deltaMinutes = pxToMinutes(ev.clientY - originY, GRID.basePxPerHour)
-          const plan = resolveDrag(event, { kind: 'resize', edge, deltaMinutes })
-          if (!plan || plan.kind !== 'patch') return
-          patch.mutate({ id: event.id, body: plan.body })
-        }
+      // A cancelled gesture must clear the draft, for the same reason as beginMove.
+      const handleCancel = () => finish()
 
-        el.addEventListener('pointermove', handleMove)
-        el.addEventListener('pointerup', handleUp, { once: true })
-      },
-    [patch],
+      el.addEventListener('pointermove', handleMove)
+      el.addEventListener('pointerup', handleUp, { once: true })
+      el.addEventListener('pointercancel', handleCancel, { once: true })
+    },
+    [patch, pxPerHour],
   )
 
-  return { draft, onPointerDownMove, onPointerDownResize }
+  return { draft, beginMove, onPointerDownResize }
 }
