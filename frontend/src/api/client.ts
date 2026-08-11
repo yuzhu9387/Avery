@@ -20,10 +20,22 @@ export class ApiError extends Error {
  * that case as "no error" and the UI shows nothing while quietly failing to
  * save, so every non-`ApiError` branch below must still return a string.
  * Do not collapse this back to a single `instanceof` check.
+ *
+ * `error.detail` is also guarded for emptiness, not just checked with
+ * `instanceof`: `unwrap` falls back to `res.statusText` when a failed
+ * response's body isn't `{detail: string}`-shaped, and browsers set
+ * `statusText` to `''` for every HTTP/2 response — HTTP/2 dropped the reason
+ * phrase from the protocol entirely. So a 500 behind an HTTP/2 proxy with an
+ * unparseable body is a perfectly real `ApiError` whose `detail` is `''`.
+ * Without this guard that falls through to the caller as `''`, which a
+ * `{error && (...)}` check in JSX treats exactly like `null` — the popover
+ * shows nothing again, for a narrower class of failure. Every branch that
+ * has nothing useful to say ends at the same fallback string, deliberately:
+ * one message, not a second ad hoc one per empty-string case.
  */
 export function errorMessage(error: unknown): string | null {
   if (error == null) return null
-  if (error instanceof ApiError) return error.detail
+  if (error instanceof ApiError && error.detail) return error.detail
   if (error instanceof Error && error.message) return error.message
   return 'Something went wrong. Please try again.'
 }
