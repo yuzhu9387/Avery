@@ -38,7 +38,7 @@ export default function App() {
           to="/tasks"
           className={({ isActive }) =>
             [
-              'shrink-0 rounded-full px-3 py-1.5 text-sm font-bold transition-colors',
+              'shrink-0 rounded-full border border-line px-3 py-1 text-sm font-bold transition-colors',
               isActive ? 'bg-[var(--pale)] text-ink' : 'text-ink-muted hover:bg-[var(--pale)]/50 hover:text-ink',
             ].join(' ')
           }

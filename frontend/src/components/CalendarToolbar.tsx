@@ -45,7 +45,7 @@ export function CalendarToolbar({
         <button type="button" aria-label="Next" className={NAV_BUTTON} onClick={onNext}>
           ›
         </button>
-        <span className="text-lg font-bold">{title}</span>
+        <span className="text-sm font-semibold text-ink">{title}</span>
       </div>
 
       <div className="flex shrink-0 gap-0.5 rounded-full p-0.5" style={{ background: 'var(--pale)' }}>

@@ -120,7 +120,7 @@ export function CategoryRail({
           below, which keep their own independent state. */}
       <button
         type="button"
-        className="w-full rounded-full px-3 py-1.5 text-xs font-bold uppercase tracking-wide transition-colors"
+        className="self-start rounded-full px-2 py-1 text-[10px] font-bold uppercase tracking-wide transition-colors"
         style={
           hideRoutine
             ? { background: 'var(--pale)', color: 'var(--ink)' }

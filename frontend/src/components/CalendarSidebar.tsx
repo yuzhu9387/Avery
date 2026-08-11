@@ -43,23 +43,25 @@ export function CalendarSidebar({
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
         <MiniMonth selectedWeekStart={selectedWeekStart} onPick={onPickDay} />
 
-        <h2 className="mb-3 mt-4 text-xs font-medium uppercase tracking-wide text-ink-faint">
-          This week
-        </h2>
-        {ratios.isLoading && <p className="text-xs text-ink-faint">Checking your rule…</p>}
-        {noActiveRule && (
-          <p className="text-xs text-ink-faint">
-            No active rule yet — set one on the Rules page to see this week against it.
-          </p>
-        )}
-        {!noActiveRule && ratios.isError && (
-          <p className="text-xs text-ink-faint">Couldn't load this week's ratios.</p>
-        )}
-        {ratios.data && (
-          <RatioBars groups={ratios.data.metrics.groups} tolerance={ratios.data.rule.tolerance} compact />
-        )}
+        <div className="mt-4 border-t border-line pt-4">
+          <h2 className="mb-3 text-xs font-bold uppercase tracking-wide text-ink-faint">
+            This week
+          </h2>
+          {ratios.isLoading && <p className="text-xs text-ink-faint">Checking your rule…</p>}
+          {noActiveRule && (
+            <p className="text-xs text-ink-faint">
+              No active rule yet — set one on the Rules page to see this week against it.
+            </p>
+          )}
+          {!noActiveRule && ratios.isError && (
+            <p className="text-xs text-ink-faint">Couldn't load this week's ratios.</p>
+          )}
+          {ratios.data && (
+            <RatioBars groups={ratios.data.metrics.groups} tolerance={ratios.data.rule.tolerance} compact />
+          )}
+        </div>
 
-        <div className="mt-6">
+        <div className="mt-4 border-t border-line pt-4">
           <CategoryRail
             tags={tags}
             minutesByTag={ratios.data?.metrics.minutes_by_primary_tag ?? {}}

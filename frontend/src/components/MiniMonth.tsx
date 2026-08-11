@@ -31,7 +31,7 @@ export function MiniMonth({
   return (
     <div>
       <div className="mb-2 flex items-center justify-between">
-        <span className="text-xs font-bold">
+        <span className="text-xs font-bold uppercase tracking-wide text-ink-faint">
           {MONTH_NAMES[cursor.getMonth()]} {cursor.getFullYear()}
         </span>
         <span className="flex gap-1">
