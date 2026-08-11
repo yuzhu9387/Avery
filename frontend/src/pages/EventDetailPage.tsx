@@ -41,6 +41,21 @@ export default function EventDetailPage() {
   const isDone = data.completed_at !== null
   const day = parseLocal(data.start_at)
 
+  // A mutation's `error`/`isError` survives until that same mutation is re-invoked —
+  // TanStack Query has no idea the other one has since run. Without resetting both
+  // before firing either, a failed "Mark done" followed by a failed "Mark not done"
+  // would leave the banner showing the older of the two errors (`??` below picks
+  // whichever `.error` is non-null, not whichever is most recent). Resetting both
+  // here makes "at most one of the two carries an error" actually true, and also
+  // clears a stale banner the instant the user retries rather than leaving it up
+  // while the new request is in flight.
+  const toggleDone = () => {
+    complete.reset()
+    uncomplete.reset()
+    if (isDone) uncomplete.mutate(id)
+    else complete.mutate(id)
+  }
+
   return (
     <div className="mx-auto max-w-lg p-6">
       <Link to="/" className="text-xs text-ink-muted">
@@ -71,7 +86,7 @@ export default function EventDetailPage() {
           type="button"
           className="rounded-[8px] px-3 py-1.5 text-sm font-bold"
           style={{ background: 'var(--pale)' }}
-          onClick={() => (isDone ? uncomplete.mutate(id) : complete.mutate(id))}
+          onClick={toggleDone}
         >
           {isDone ? 'Mark not done' : 'Mark done'}
         </button>
