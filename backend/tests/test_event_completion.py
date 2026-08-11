@@ -108,3 +108,56 @@ async def test_uncompleting_does_not_resurrect_an_archived_task(client):
 
 async def test_complete_on_a_missing_event_is_404(client):
     assert (await client.post("/api/events/9999/complete")).status_code == 404
+
+
+async def test_roll_over_preserves_wall_clock_time(client):
+    event = await _event(client, kind="task", name="Water plants",
+                         start="2026-08-03T21:30:00", end="2026-08-03T22:15:00")
+    rolled = await client.post(
+        "/api/events/roll-over",
+        json={"event_ids": [event["id"]], "to_date": "2026-08-04"},
+    )
+    assert rolled.status_code == 200
+    moved = rolled.json()[0]
+    assert moved["start_at"] == "2026-08-04T21:30:00"
+    assert moved["end_at"] == "2026-08-04T22:15:00"
+
+
+async def test_roll_over_refuses_an_event_card(client):
+    event = await _event(client, name="Dentist")
+    bad = await client.post(
+        "/api/events/roll-over",
+        json={"event_ids": [event["id"]], "to_date": "2026-08-04"},
+    )
+    # Refused, not silently skipped: a caller asking to move an appointment has a
+    # bug, and a partial success would hide it.
+    assert bad.status_code == 422
+
+
+async def test_roll_over_refuses_an_already_complete_card(client):
+    event = await _event(client, kind="task", name="Water plants")
+    await client.post(f"/api/events/{event['id']}/complete")
+    bad = await client.post(
+        "/api/events/roll-over",
+        json={"event_ids": [event["id"]], "to_date": "2026-08-04"},
+    )
+    assert bad.status_code == 422
+
+
+async def test_roll_over_refuses_an_unknown_id_without_moving_the_rest(client):
+    event = await _event(client, kind="task", name="Water plants",
+                         start="2026-08-03T21:30:00", end="2026-08-03T22:15:00")
+    bad = await client.post(
+        "/api/events/roll-over",
+        json={"event_ids": [event["id"], 9999], "to_date": "2026-08-04"},
+    )
+    assert bad.status_code == 422
+    unchanged = (await client.get(f"/api/events/{event['id']}")).json()
+    assert unchanged["start_at"] == "2026-08-03T21:30:00"
+
+
+async def test_roll_over_requires_at_least_one_id(client):
+    bad = await client.post(
+        "/api/events/roll-over", json={"event_ids": [], "to_date": "2026-08-04"}
+    )
+    assert bad.status_code == 422

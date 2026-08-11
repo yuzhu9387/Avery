@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,6 +13,10 @@ from app.services.tags import assert_tags_exist
 
 class TaskNotFound(Exception):
     """Raised when create_event is given a task_id that does not exist."""
+
+
+class RollOverRejected(Exception):
+    """Raised when a roll-over request names something it may not move."""
 
 
 async def list_events(
@@ -160,3 +164,37 @@ async def uncomplete_event(session: AsyncSession, event_id: int) -> Event | None
     await session.commit()
     await session.refresh(event)
     return event
+
+
+async def roll_over(
+    session: AsyncSession, event_ids: list[int], to_date: date
+) -> list[Event]:
+    """Shift whole task cards onto another date, keeping wall-clock time and duration.
+
+    All-or-nothing on purpose: every id is validated before anything moves, so a
+    request with one bad id leaves the calendar exactly as it was.
+    """
+    stmt = select(Event).where(Event.id.in_(event_ids)).order_by(Event.start_at, Event.id)
+    events = list((await session.scalars(stmt)).all())
+
+    found = {e.id for e in events}
+    missing = [i for i in event_ids if i not in found]
+    if missing:
+        raise RollOverRejected(f"unknown event ids: {missing}")
+    not_tasks = [e.id for e in events if e.kind != EventKind.TASK]
+    if not_tasks:
+        raise RollOverRejected(f"not task cards, will not be moved: {not_tasks}")
+    already_done = [e.id for e in events if e.completed_at is not None]
+    if already_done:
+        raise RollOverRejected(f"already complete: {already_done}")
+
+    for event in events:
+        # A whole-day delta, so an event that runs past midnight keeps its shape.
+        delta = to_date - event.start_at.date()
+        event.start_at = event.start_at + delta
+        event.end_at = event.end_at + delta
+
+    await session.commit()
+    for event in events:
+        await session.refresh(event)
+    return events

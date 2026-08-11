@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
-from app.schemas.event import EventCreate, EventMove, EventOut, EventUpdate
+from app.schemas.event import EventCreate, EventMove, EventOut, EventRollOver, EventUpdate
 from app.services import events as service
 from app.services.tags import UnknownTagIds
 
@@ -30,6 +30,14 @@ async def create_event(data: EventCreate, session: AsyncSession = Depends(get_se
     except UnknownTagIds as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"unknown tag ids: {exc}")
     except ValueError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc))
+
+
+@router.post("/roll-over", response_model=list[EventOut])
+async def roll_over(data: EventRollOver, session: AsyncSession = Depends(get_session)):
+    try:
+        return await service.roll_over(session, data.event_ids, data.to_date)
+    except service.RollOverRejected as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc))
 
 

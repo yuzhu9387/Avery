@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -63,3 +63,8 @@ class EventOut(BaseModel):
     source: EventSource
     template_block_id: int | None
     notes: str
+
+
+class EventRollOver(BaseModel):
+    event_ids: list[int] = Field(min_length=1)
+    to_date: date
