@@ -92,6 +92,12 @@ export default function EventDetailPage() {
         </button>
       </div>
 
+      {(complete.isError || uncomplete.isError) && (
+        <p className="mt-2 text-xs" style={{ color: 'var(--over)' }}>
+          {errorMessage(complete.error ?? uncomplete.error)}
+        </p>
+      )}
+
       {remove.isError && (
         <p className="mt-2 text-xs" style={{ color: 'var(--over)' }}>
           {errorMessage(remove.error)}
