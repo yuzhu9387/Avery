@@ -110,12 +110,14 @@ export default function RulesPage() {
   const loaded = !rulesQuery.isLoading && !rulesQuery.isError
 
   return (
-    <div className="mx-auto max-w-3xl p-6">
-      <h1 className="mb-1 font-display text-xl">Rules</h1>
-      <p className="mb-6 text-sm text-ink-faint">
-        The commitment every week and every monthly report is measured against.
-      </p>
-
+    // Same outer padding as RoutinePage (`p-4 sm:p-5`, full width) rather than the
+    // old `mx-auto max-w-3xl` — that wrapper sat this page's content in a centered
+    // column while Routine filled the panel, so the two read as unrelated pages
+    // rather than siblings when flipping between them. The page's own "Rules" title
+    // and blurb are gone for the same reason: `CalendarOverlayShell` already renders
+    // "Rules" as the panel header, and Routine has no second, page-level heading
+    // underneath it either.
+    <div className="p-4 sm:p-5">
       {rulesQuery.isLoading && <p className="text-sm text-ink-faint">Loading rules…</p>}
       {rulesQuery.isError && <p className="text-sm text-ink-faint">Couldn't load the rules.</p>}
 
@@ -197,10 +199,10 @@ export default function RulesPage() {
 }
 
 /** The displayed version, front-panel style — mirrors RoutinePage's `Screen`: name and
- *  description are editable in place (blur-commit, via `PATCH /rules/{id}`), everything
- *  else (ratios, groups, dates) is read-only here because a version's ratio math is
- *  immutable — a new commitment is a new version, saved from the "New version" editor
- *  below, never an edit to this one. */
+ *  description are editable in place (click-to-edit, committed via `PATCH /rules/{id}`),
+ *  everything else (ratios, groups, dates) is read-only here because a version's ratio
+ *  math is immutable — a new commitment is a new version, saved from the "New version"
+ *  editor below, never an edit to this one. */
 function Display({
   version,
   onRename,
@@ -210,9 +212,6 @@ function Display({
   onRename: (name: string) => void
   onNote: (note: string) => void
 }) {
-  const [name, setName] = useState<string | null>(null)
-  const [note, setNote] = useState<string | null>(null)
-
   if (!version) return null
 
   const isActive = version.effective_to === null
@@ -233,28 +232,23 @@ function Display({
           }}
         />
         <div className="min-w-0 flex-1">
-          <input
-            value={name ?? version.name}
-            onChange={(e) => setName(e.target.value)}
-            onBlur={() => {
-              const next = (name ?? '').trim()
-              if (name !== null && next && next !== version.name) onRename(next)
-              setName(null)
-            }}
-            aria-label="Version name"
-            className="w-full truncate border-none bg-transparent font-display text-[15px] leading-tight text-ink outline-none focus:ring-0"
+          <EditableField
+            key={`name-${version.id}`}
+            value={version.name}
+            onCommit={onRename}
+            buttonAriaLabel="Edit rule name"
+            inputAriaLabel="Rule name"
+            className="font-display text-[15px] leading-tight text-ink"
           />
-          <input
-            value={note ?? version.note}
-            onChange={(e) => setNote(e.target.value)}
-            onBlur={() => {
-              const next = (note ?? '').trim()
-              if (note !== null && next !== version.note) onNote(next)
-              setNote(null)
-            }}
+          <EditableField
+            key={`note-${version.id}`}
+            value={version.note}
+            onCommit={onNote}
+            allowEmpty
             placeholder="Add a description"
-            aria-label="Version description"
-            className="w-full truncate border-none bg-transparent text-[11px] leading-tight text-ink-faint outline-none focus:ring-0"
+            buttonAriaLabel="Edit rule description"
+            inputAriaLabel="Rule description"
+            className="text-[11px] leading-tight text-ink-faint"
           />
         </div>
         {isActive && (
@@ -287,6 +281,102 @@ function Display({
         </p>
       </div>
     </div>
+  )
+}
+
+/**
+ * Plain text until clicked, then an input in place (item 3 of the rail-polish
+ * pass): the front panel used to show the name/description as persistent,
+ * always-editable `<input>`s with no Enter/Escape handling, which read as
+ * "input fields sitting on a form" rather than "text you can click into". This
+ * makes the click-to-edit step explicit and adds what the old inputs lacked —
+ * Enter commits, Escape cancels, and an IME guard so confirming a Chinese
+ * candidate with Enter doesn't blur the field mid-composition.
+ *
+ * Distinct from `InlineText` (used on the version-list rows below): that
+ * component is *always* an `<input>`, styled to read as text at rest — the
+ * right choice there since the whole row is already a click target and the
+ * field only needs to stay out of the way until hovered. Here there is no
+ * surrounding click target to defer to, so entering edit mode is its own
+ * explicit click.
+ */
+function EditableField({
+  value,
+  onCommit,
+  buttonAriaLabel,
+  inputAriaLabel,
+  placeholder,
+  className,
+  allowEmpty = false,
+}: {
+  value: string
+  onCommit: (next: string) => void
+  buttonAriaLabel: string
+  inputAriaLabel: string
+  placeholder?: string
+  className?: string
+  /** A description may be cleared; a name may not. */
+  allowEmpty?: boolean
+}) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(value)
+
+  const rowClass = ['w-full truncate rounded-[5px] px-1 outline-none', className ?? ''].join(' ')
+
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        onClick={() => {
+          setDraft(value)
+          setEditing(true)
+        }}
+        aria-label={buttonAriaLabel}
+        className={[
+          rowClass,
+          'block border border-transparent text-left transition-colors hover:border-line hover:bg-[var(--pale)]/60',
+          'focus-visible:border-line focus-visible:bg-[var(--surface-raised)]',
+          !value ? 'text-ink-faint' : '',
+        ].join(' ')}
+      >
+        {value || placeholder}
+      </button>
+    )
+  }
+
+  const commit = () => {
+    setEditing(false)
+    const next = draft.trim()
+    if (!next && !allowEmpty) return
+    if (next !== value) onCommit(next)
+  }
+
+  return (
+    <input
+      autoFocus
+      value={draft}
+      placeholder={placeholder}
+      aria-label={inputAriaLabel}
+      onChange={(e) => setDraft(e.target.value)}
+      onFocus={(e) => e.currentTarget.select()}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        // Without this, Escape (and Enter) bubble up to `CalendarOverlayShell`'s
+        // window-level Escape listener, which closes the whole Rules panel instead
+        // of just cancelling this field's edit.
+        e.stopPropagation()
+        // `isComposing` guards an IME candidate-selection Enter (e.g. confirming a
+        // Chinese candidate) from being read as commit-and-blur.
+        if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+          e.preventDefault()
+          e.currentTarget.blur()
+        } else if (e.key === 'Escape') {
+          setDraft(value)
+          setEditing(false)
+        }
+      }}
+      className={[rowClass, 'border border-line bg-[var(--surface-raised)]'].join(' ')}
+    />
   )
 }
 

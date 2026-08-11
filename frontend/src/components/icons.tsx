@@ -62,3 +62,17 @@ export function IconRules(props: IconProps) {
     </svg>
   )
 }
+
+/** A trash-can glyph for the version delete control (item 2) — a proper icon in
+ *  place of a bare "×", so the affordance reads as "delete" without hovering. */
+export function IconTrash(props: IconProps) {
+  return (
+    <svg {...BASE} aria-hidden {...props}>
+      <path d="M2.75 4.25h10.5" />
+      <path d="M6.25 4.25V3a1 1 0 0 1 1-1h1.5a1 1 0 0 1 1 1v1.25" />
+      <path d="M4.25 4.25l0.55 8.25a1 1 0 0 0 1 0.93h4.4a1 1 0 0 0 1-0.93l0.55-8.25" />
+      <line x1="6.5" y1="6.75" x2="6.5" y2="10.75" />
+      <line x1="9.5" y1="6.75" x2="9.5" y2="10.75" />
+    </svg>
+  )
+}

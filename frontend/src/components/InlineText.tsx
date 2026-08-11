@@ -53,7 +53,10 @@ export function InlineText({
       onClick={(e) => e.stopPropagation()}
       onKeyDown={(e) => {
         e.stopPropagation()
-        if (e.key === 'Enter') {
+        // `isComposing` guards an IME candidate-selection Enter (e.g. confirming a
+        // Chinese candidate) from being read as commit-and-blur — without it, Enter
+        // mid-composition would blur the field before the user finished typing.
+        if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
           e.preventDefault()
           e.currentTarget.blur()
         } else if (e.key === 'Escape') {
