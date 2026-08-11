@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useOutletContext } from 'react-router-dom'
 
+import type { HeaderSlot } from '../App'
 import { ApiError, errorMessage } from '../api/client'
 import { invalidateCalendar } from '../api/invalidate'
 import { qk } from '../api/keys'
@@ -39,8 +40,30 @@ function rangeLabel(monday: Date): string {
 
 export default function WeekPage() {
   const navigate = useNavigate()
+  const { setControls, railOpen } = useOutletContext<HeaderSlot>()
   const [monday, setMonday] = useState(() => mondayOf(new Date()))
   const day = formatDate(monday)
+
+  useEffect(() => {
+    setControls(
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          className="rounded-full border border-line px-3 py-1 text-sm font-bold transition-colors hover:bg-[var(--pale)]/50"
+          onClick={() => setMonday(mondayOf(new Date()))}
+        >
+          Today
+        </button>
+        <button type="button" aria-label="Previous week" className={NAV_BUTTON}
+          onClick={() => setMonday((m) => addDays(m, -7))}>‹</button>
+        <button type="button" aria-label="Next week" className={NAV_BUTTON}
+          onClick={() => setMonday((m) => addDays(m, 7))}>›</button>
+        <span className="text-lg font-bold">{rangeLabel(monday)}</span>
+      </div>,
+    )
+    // Leaving the page must not leave stale controls in a shared header.
+    return () => setControls(null)
+  }, [monday, setControls])
 
   const week = useWeek(monday)
   // Gated on `week` resolving first — see the comment on `useWeekRatios` for why
@@ -137,69 +160,45 @@ export default function WeekPage() {
 
   return (
     <div className="flex h-full min-h-0">
-      <aside className="w-56 shrink-0 overflow-y-auto border-r border-line bg-surface p-4">
-        <MiniMonth selectedWeekStart={monday} onPick={(day) => setMonday(mondayOf(day))} />
+      {railOpen && (
+        <aside className="w-56 shrink-0 overflow-y-auto border-r border-line bg-surface p-4">
+          <MiniMonth selectedWeekStart={monday} onPick={(day) => setMonday(mondayOf(day))} />
 
-        <h2 className="mb-3 mt-4 text-xs font-medium uppercase tracking-wide text-ink-faint">
-          This week
-        </h2>
-        {ratios.isLoading && <p className="text-xs text-ink-faint">Checking your rule…</p>}
-        {noActiveRule && (
-          <p className="text-xs text-ink-faint">
-            No active rule yet — set one on the Rules page to see this week against it.
-          </p>
-        )}
-        {!noActiveRule && ratios.isError && (
-          <p className="text-xs text-ink-faint">Couldn't load this week's ratios.</p>
-        )}
-        {ratios.data && (
-          <RatioBars groups={ratios.data.metrics.groups} tolerance={ratios.data.rule.tolerance} compact />
-        )}
+          <h2 className="mb-3 mt-4 text-xs font-medium uppercase tracking-wide text-ink-faint">
+            This week
+          </h2>
+          {ratios.isLoading && <p className="text-xs text-ink-faint">Checking your rule…</p>}
+          {noActiveRule && (
+            <p className="text-xs text-ink-faint">
+              No active rule yet — set one on the Rules page to see this week against it.
+            </p>
+          )}
+          {!noActiveRule && ratios.isError && (
+            <p className="text-xs text-ink-faint">Couldn't load this week's ratios.</p>
+          )}
+          {ratios.data && (
+            <RatioBars groups={ratios.data.metrics.groups} tolerance={ratios.data.rule.tolerance} compact />
+          )}
 
-        <h2 className="mb-3 mt-6 text-xs font-bold uppercase tracking-wide text-ink-faint">
-          Categories
-        </h2>
-        <CategoryRail
-          tags={selectableTags}
-          minutesByTag={ratios.data?.metrics.minutes_by_primary_tag ?? {}}
-          totalMinutes={ratios.data?.metrics.total_minutes ?? 0}
-          hidden={hidden}
-          onToggle={toggle}
-        />
-      </aside>
+          <h2 className="mb-3 mt-6 text-xs font-bold uppercase tracking-wide text-ink-faint">
+            Categories
+          </h2>
+          <CategoryRail
+            tags={selectableTags}
+            minutesByTag={ratios.data?.metrics.minutes_by_primary_tag ?? {}}
+            totalMinutes={ratios.data?.metrics.total_minutes ?? 0}
+            hidden={hidden}
+            onToggle={toggle}
+          />
+        </aside>
+      )}
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <div className="flex items-center gap-3 border-b border-line px-4 py-3">
-          <div className="flex items-center gap-0.5">
-            <button
-              type="button"
-              aria-label="Previous week"
-              className={NAV_BUTTON}
-              onClick={() => setMonday((m) => addDays(m, -7))}
-            >
-              ‹
-            </button>
-            <button
-              type="button"
-              className={NAV_BUTTON}
-              onClick={() => setMonday(mondayOf(new Date()))}
-            >
-              Today
-            </button>
-            <button
-              type="button"
-              aria-label="Next week"
-              className={NAV_BUTTON}
-              onClick={() => setMonday((m) => addDays(m, 7))}
-            >
-              ›
-            </button>
+        {week.data?.materialized && (
+          <div className="border-b border-line px-4 py-1.5 text-xs text-ink-faint">
+            Generated from your template
           </div>
-          <div className="text-sm font-medium text-ink">{rangeLabel(monday)}</div>
-          {week.data?.materialized && (
-            <div className="text-xs text-ink-faint">Generated from your template</div>
-          )}
-        </div>
+        )}
 
         {isEmptyPastWeek && (
           <div className="flex items-center justify-between border-b border-line bg-surface px-4 py-2">
