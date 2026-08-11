@@ -1,7 +1,7 @@
 import type { AveryEvent, Tag } from '../api/types'
 import type { Segment } from '../lib/geometry'
 import { formatTimeRange } from '../lib/datetime'
-import { tint } from '../lib/color'
+import { DONE_OPACITY, chipShape } from '../lib/chipStyle'
 
 /** The strip of column left free down the right-hand side of every card. It is a live
  *  hit target for creating a new card at that time, which is the point of leaving it. */
@@ -13,6 +13,7 @@ export function EventCard({
   tag,
   title,
   onPointerDown,
+  onToggleComplete,
   isDragging,
   dragOffset,
 }: {
@@ -21,6 +22,10 @@ export function EventCard({
   tag: Tag | undefined
   title: string
   onPointerDown?: (e: React.PointerEvent) => void
+  /** Toggles completion from the glyph directly, bypassing the card's double-click
+   *  arbitration. `point` is the viewport coordinate the confetti burst should
+   *  originate from. Only rendered as a button when supplied. */
+  onToggleComplete?: (point: { x: number; y: number }) => void
   isDragging?: boolean
   dragOffset?: { dx: number; dy: number }
 }) {
@@ -35,17 +40,7 @@ export function EventCard({
     borderBottomRightRadius: segment.isEnd ? 6 : 0,
   }
 
-  // A task card reads as a to-do with a slot: light surface, thin outline, a tick box.
-  // An event card reads as occupied time: filled, with a solid spine on the left.
-  const shape = isTask
-    ? {
-        background: isDone ? 'transparent' : 'var(--surface-raised)',
-        border: `1px solid ${color}`,
-      }
-    : {
-        background: isDone ? 'transparent' : tint(color, 0.22),
-        borderLeft: `3px solid ${color}`,
-      }
+  const shape = chipShape({ color, isTask, isDone })
 
   return (
     <div
@@ -57,7 +52,7 @@ export function EventCard({
         right: CARD_RIGHT_GUTTER_PX,
         ...corners,
         ...shape,
-        opacity: isDone ? 0.45 : isDragging ? 0.85 : undefined,
+        opacity: isDone ? DONE_OPACITY : isDragging ? 0.85 : undefined,
         cursor: isDragging ? 'grabbing' : onPointerDown ? 'pointer' : 'default',
         transform: dragOffset ? `translate(${dragOffset.dx}px, ${dragOffset.dy}px)` : undefined,
         zIndex: isDragging ? 20 : undefined,
@@ -66,11 +61,37 @@ export function EventCard({
       onPointerDown={onPointerDown}
     >
       <div className="flex items-start gap-1 px-1.5 py-0.5">
-        {isTask && (
-          <span className="mt-px shrink-0 text-[11px] leading-tight" style={{ color }}>
-            {isDone ? '✓' : '○'}
-          </span>
-        )}
+        {isTask &&
+          (onToggleComplete ? (
+            <button
+              type="button"
+              aria-label={isDone ? 'Mark not done' : 'Mark done'}
+              className="shrink-0 appearance-none border-0 bg-transparent text-[11px] leading-tight"
+              style={{
+                color,
+                // Pads the click target out to a comfortable size without disturbing
+                // the row's layout: padding grows the hit area, and the equal-and-
+                // opposite margin keeps this element's contribution to the flex row
+                // (its margin box) the same size as the bare glyph — so a completed
+                // and an incomplete card still line up, and the title never shifts.
+                // `marginTop` alone is nudged by the glyph's original 1px offset
+                // (matching the sibling title's line-box) minus the added padding.
+                margin: -6,
+                marginTop: 1 - 6,
+                padding: 6,
+              }}
+              onPointerDown={(e) => {
+                e.stopPropagation()
+                onToggleComplete({ x: e.clientX, y: e.clientY })
+              }}
+            >
+              {isDone ? '✓' : '○'}
+            </button>
+          ) : (
+            <span className="mt-px shrink-0 text-[11px] leading-tight" style={{ color }}>
+              {isDone ? '✓' : '○'}
+            </span>
+          ))}
         <div className="min-w-0 flex-1">
           <div
             className="truncate text-[11px] font-bold leading-tight"

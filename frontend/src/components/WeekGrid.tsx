@@ -75,6 +75,14 @@ function GridCard({
       [],
     ),
   })
+  // The circle's own click bypasses gesture arbitration entirely (it stops the
+  // pointer event before `onPointerDown` above ever sees it), so it needs its own
+  // binding — but it must go through the same latest ref as the gestures do, or a
+  // refetch mid-gesture could fire it against a stale event just the same.
+  const onGlyphToggleComplete = useCallback(
+    (p: { x: number; y: number }) => latest.current.onToggleComplete(latest.current.event, p),
+    [],
+  )
 
   return (
     <div className="contents" onPointerDown={(e) => e.stopPropagation()}>
@@ -84,6 +92,7 @@ function GridCard({
         tag={tag}
         title={title}
         onPointerDown={onPointerDown}
+        onToggleComplete={onGlyphToggleComplete}
         isDragging={isDragging}
         dragOffset={dragOffset}
       />
