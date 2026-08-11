@@ -2,7 +2,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from app.models.event import EventSource
+from app.models.event import EventKind, EventSource
 
 
 class EventCreate(BaseModel):
@@ -11,6 +11,7 @@ class EventCreate(BaseModel):
     start_at: datetime
     end_at: datetime
     tag_ids: list[int] = Field(default_factory=list)
+    kind: EventKind = EventKind.EVENT
     source: EventSource = EventSource.MANUAL
     template_block_id: int | None = None
     notes: str = ""
@@ -57,6 +58,8 @@ class EventOut(BaseModel):
     start_at: datetime
     end_at: datetime
     tag_ids: list[int]
+    kind: EventKind
+    completed_at: datetime | None
     source: EventSource
     template_block_id: int | None
     notes: str

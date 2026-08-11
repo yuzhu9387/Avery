@@ -13,6 +13,11 @@ class EventSource(StrEnum):
     AGENT = "agent"
 
 
+class EventKind(StrEnum):
+    EVENT = "event"
+    TASK = "task"
+
+
 class Event(Base):
     __tablename__ = "events"
 
@@ -24,6 +29,10 @@ class Event(Base):
     end_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     tag_ids: Mapped[list[int]] = mapped_column(JSON, default=list, nullable=False)
     source: Mapped[str] = mapped_column(String(16), default=EventSource.MANUAL, nullable=False)
+    kind: Mapped[str] = mapped_column(String(8), default=EventKind.EVENT, nullable=False)
+    # A card's own completion, distinct from Task.status: an appointment happening is
+    # not a to-do being finished. Only kind="task" cards sync the two (see services).
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     template_block_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     notes: Mapped[str] = mapped_column(Text, default="", nullable=False)
 
