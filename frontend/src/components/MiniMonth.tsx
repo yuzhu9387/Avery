@@ -22,14 +22,11 @@ export function MiniMonth({
   const weekEnd = addDays(selectedWeekStart, 6)
 
   // Sync cursor only when the selected week is not visible in the current grid.
-  // This preserves the user's paging position when clicking visible days, while
-  // pulling the view back into range when the main grid navigates elsewhere.
+  // Paging the mini month (‹ › arrows) is deliberate exploration and must not be interrupted.
+  // Only re-sync when the main grid navigates (selectedWeekStart changes).
   useEffect(() => {
-    if (!isWeekVisibleIn(days, selectedWeekStart)) {
-      // Move cursor to the month containing the selected week
-      setCursor(new Date(selectedWeekStart.getFullYear(), selectedWeekStart.getMonth(), 1))
-    }
-  }, [selectedWeekStart, days])
+    setCursor((prev) => (isWeekVisibleIn(gridDays(prev), selectedWeekStart) ? prev : new Date(selectedWeekStart)))
+  }, [selectedWeekStart])
 
   return (
     <div>
