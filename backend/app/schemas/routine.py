@@ -34,7 +34,13 @@ class RoutineBlockOut(BaseModel):
 
 class RoutineCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
+    note: str = ""
     is_active: bool = True
+    # Copy the currently active routine's blocks into the new version instead of
+    # starting empty. A new version almost always means "like the current one,
+    # but with a change", and starting empty is how an active routine ends up
+    # with no blocks -- which silently generates empty weeks.
+    copy_blocks_from_active: bool = False
 
 
 class RoutineOut(BaseModel):
@@ -42,8 +48,10 @@ class RoutineOut(BaseModel):
 
     id: int
     name: str
+    note: str
     is_active: bool
     created_at: datetime
+    updated_at: datetime
     blocks: list[RoutineBlockOut]
 
 
@@ -55,9 +63,11 @@ class MaterializeResult(BaseModel):
 
 class RoutineUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
+    # A note may legitimately be cleared, so "" is allowed where a name is not.
+    note: str | None = None
     is_active: bool | None = None
 
-    @field_validator("name", "is_active")
+    @field_validator("name", "note", "is_active")
     @classmethod
     def reject_explicit_null(cls, value):
         if value is None:

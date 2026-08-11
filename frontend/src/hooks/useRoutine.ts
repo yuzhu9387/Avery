@@ -7,12 +7,13 @@ import {
   createRoutine,
   deleteBlock,
   getActiveRoutine,
+  listRoutines,
   previewWeek,
   updateBlock,
   updateRoutine,
 } from '../api/routines'
 import { qk } from '../api/keys'
-import type { Routine, RoutineBlock } from '../api/types'
+import type { NewRoutine, Routine, RoutineBlock } from '../api/types'
 
 export type ColumnKey = 'everyday' | 'weekday' | 'saturday' | 'sunday' | 'custom'
 
@@ -99,11 +100,24 @@ export function useActiveRoutine() {
   })
 }
 
+/** Every version, most recently changed first — the backend already returns them
+ *  in that order, so the list is not re-sorted here and cannot disagree with it. */
+export function useRoutines() {
+  return useQuery({ queryKey: qk.routines, queryFn: listRoutines })
+}
+
 /** A block mutation can change what any future, not-yet-materialized week looks
  *  like, and rule evaluation reads through events — so the week grid and the
- *  ratio rail both need their caches dropped alongside the routine itself. */
+ *  ratio rail both need their caches dropped alongside the routine itself.
+ *
+ *  Both `['routine']` and `['routines']` have to be listed. React Query matches
+ *  query keys by prefix element-by-element, and 'routine' !== 'routines', so
+ *  invalidating one does NOT touch the other however similar they look: the
+ *  version list would have kept showing a stale `updated_at`, a stale note, and
+ *  the wrong version badged as active after every single edit. */
 function invalidateRoutineEffects(queryClient: QueryClient) {
   queryClient.invalidateQueries({ queryKey: ['routine'] })
+  queryClient.invalidateQueries({ queryKey: qk.routines })
   queryClient.invalidateQueries({ queryKey: ['week'] })
   queryClient.invalidateQueries({ queryKey: ['evaluate'] })
 }
@@ -115,8 +129,8 @@ function invalidateRoutineEffects(queryClient: QueryClient) {
 export function useCreateRoutine() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (body: Partial<Routine>) => createRoutine(body),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['routine'] }),
+    mutationFn: (body: NewRoutine) => createRoutine(body),
+    onSuccess: () => invalidateRoutineEffects(queryClient),
   })
 }
 
@@ -124,7 +138,9 @@ export function useUpdateRoutine() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: ({ id, body }: { id: number; body: Partial<Routine> }) => updateRoutine(id, body),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['routine'] }),
+    // Activating a version retires another one and changes which blocks the week
+    // grid would generate, so this needs the full sweep, not just ['routine'].
+    onSuccess: () => invalidateRoutineEffects(queryClient),
   })
 }
 

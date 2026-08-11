@@ -1,18 +1,37 @@
 from datetime import datetime, time
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Time
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text, Time
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
 
 
 class Routine(Base):
+    """One version of the weekly routine.
+
+    Versions are kept rather than overwritten, the same way rules are: at most
+    one is active (enforced in `services.routines`, not by the schema), and the
+    rest are history you can read and switch back to. `note` is the room to say
+    why a version exists, which is the part that is impossible to reconstruct
+    from its blocks later.
+    """
+
     __tablename__ = "routines"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
+    note: Mapped[str] = mapped_column(Text, default="", nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, nullable=False)
+    # When this version's *content* last changed: its name, its note, or its blocks.
+    #
+    # Deliberately no `onupdate=datetime.now`. Every switch of the active version
+    # writes `is_active` on two rows, and `onupdate` would stamp both with "changed
+    # just now" -- so the retired version would claim it had been edited when only
+    # its flag flipped, and the whole list would collapse to one timestamp and
+    # reshuffle on every switch. `services.routines` bumps this explicitly for the
+    # changes that really are changes.
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, nullable=False)
 
     blocks: Mapped[list["RoutineBlock"]] = relationship(
         back_populates="routine",

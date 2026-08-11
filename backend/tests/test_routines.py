@@ -317,3 +317,157 @@ async def test_preview_predicts_the_tags_that_will_be_created(client):
     await client.post("/api/weeks/2026-08-03/materialize")
     created = (await client.get("/api/events")).json()
     assert created[0]["tag_ids"] == preview["events"][0]["tag_ids"]
+
+
+# --- versioning -----------------------------------------------------------------
+#
+# Routines are versioned like rules: several rows, at most one active, the rest
+# kept as history you can switch back to. "At most one active" is enforced in the
+# service and by nothing in the schema, so these are the tests that hold it up.
+
+
+async def test_creating_an_active_routine_retires_the_previous_one(client):
+    """The silent bug this invariant exists to prevent.
+
+    `create_routine` defaults `is_active=True`, and `get_active_routine` picks the
+    highest id among the actives. Without deactivating the incumbent, creating a
+    second routine left two rows active and the newer, empty one won — so week
+    materialization read an empty routine and generated nothing, with no error
+    raised anywhere. That is how a real database ended up with 19 blocks stranded
+    on an inactive routine while the active one had none.
+    """
+    first = await _routine(client, [WEEKDAY_BLOCK])
+    second = (await client.post("/api/routines", json={"name": "Second"})).json()["id"]
+
+    listed = (await client.get("/api/routines")).json()
+    actives = [r["id"] for r in listed if r["is_active"]]
+    assert actives == [second], "exactly one routine may be active"
+
+    assert (await client.get(f"/api/routines/{first}")).json()["is_active"] is False
+
+
+async def test_an_older_version_can_be_made_active_again(client):
+    old = await _routine(client, [WEEKDAY_BLOCK])
+    new = (await client.post("/api/routines", json={"name": "Experiment"})).json()["id"]
+    assert (await client.get("/api/routines/active")).json()["id"] == new
+
+    reactivated = await client.patch(f"/api/routines/{old}", json={"is_active": True})
+    assert reactivated.status_code == 200
+
+    active = (await client.get("/api/routines/active")).json()
+    assert active["id"] == old
+    # Switching back has to bring the blocks with it, or "set active" would look
+    # like it worked while still generating empty weeks.
+    assert [b["task_name"] for b in active["blocks"]] == ["Work"]
+    assert (await client.get(f"/api/routines/{new}")).json()["is_active"] is False
+
+
+async def test_a_version_carries_a_name_and_a_note(client):
+    created = await client.post(
+        "/api/routines", json={"name": "Winter", "note": "more indoor time"}
+    )
+    routine_id = created.json()["id"]
+    assert created.json()["note"] == "more indoor time"
+
+    renamed = await client.patch(
+        f"/api/routines/{routine_id}", json={"name": "Winter 2026", "note": "less gym"}
+    )
+    assert renamed.json()["name"] == "Winter 2026"
+    assert renamed.json()["note"] == "less gym"
+
+    # A note is the one field that may legitimately be emptied again; a name is not.
+    cleared = await client.patch(f"/api/routines/{routine_id}", json={"note": ""})
+    assert cleared.json()["note"] == ""
+    assert (await client.patch(f"/api/routines/{routine_id}", json={"name": ""})).status_code == 422
+
+
+async def test_versions_are_listed_newest_change_first(client):
+    first = (await client.post("/api/routines", json={"name": "One"})).json()["id"]
+    second = (await client.post("/api/routines", json={"name": "Two"})).json()["id"]
+
+    # Editing the older version has to float it to the top: the list is ordered by
+    # when a version last changed, not by when it was created.
+    await client.patch(f"/api/routines/{first}", json={"note": "touched"})
+
+    listed = [r["id"] for r in (await client.get("/api/routines")).json()]
+    assert listed[0] == first, f"expected the just-edited version first, got {listed}"
+    assert set(listed) == {first, second}
+
+
+async def test_editing_a_block_moves_its_routines_updated_at(client):
+    """A block lives in its own table, so changing one does not touch the routine
+    row and `onupdate` never fires. Without an explicit bump the version list
+    would order by when a routine was last *renamed* — not by what changed."""
+    routine_id = await _routine(client, [WEEKDAY_BLOCK])
+    before = (await client.get(f"/api/routines/{routine_id}")).json()["updated_at"]
+
+    block_id = (await client.get(f"/api/routines/{routine_id}")).json()["blocks"][0]["id"]
+    await client.patch(f"/api/routine-blocks/{block_id}", json={"task_name": "Deep work"})
+    after_edit = (await client.get(f"/api/routines/{routine_id}")).json()["updated_at"]
+    # Strictly greater, not >=: `>=` would pass even if the bump never happened,
+    # which is the whole thing this test exists to catch.
+    assert after_edit > before, "editing a block did not move the routine's updated_at"
+
+    await client.delete(f"/api/routine-blocks/{block_id}")
+    after_delete = (await client.get(f"/api/routines/{routine_id}")).json()["updated_at"]
+    assert after_delete > after_edit, "deleting a block did not move updated_at"
+
+    await client.post(f"/api/routines/{routine_id}/blocks", json=OVERNIGHT_BLOCK)
+    after_add = (await client.get(f"/api/routines/{routine_id}")).json()["updated_at"]
+    assert after_add > after_delete, "adding a block did not move updated_at"
+
+
+async def test_a_new_version_can_start_from_the_active_ones_blocks(client):
+    await _routine(client, [WEEKDAY_BLOCK, OVERNIGHT_BLOCK])
+
+    forked = await client.post(
+        "/api/routines", json={"name": "Fork", "copy_blocks_from_active": True}
+    )
+    assert forked.status_code == 201
+    assert sorted(b["task_name"] for b in forked.json()["blocks"]) == ["Rest", "Work"]
+
+    # Copies, not shares: editing the fork must not reach back into the original.
+    original = [r for r in (await client.get("/api/routines")).json() if not r["is_active"]][0]
+    fork_block = forked.json()["blocks"][0]
+    await client.patch(f"/api/routine-blocks/{fork_block['id']}", json={"task_name": "Changed"})
+    untouched = (await client.get(f"/api/routines/{original['id']}")).json()
+    assert "Changed" not in [b["task_name"] for b in untouched["blocks"]]
+
+
+async def test_a_new_version_starts_empty_unless_asked_to_copy(client):
+    await _routine(client, [WEEKDAY_BLOCK])
+    plain = await client.post("/api/routines", json={"name": "Blank"})
+    assert plain.json()["blocks"] == []
+
+
+async def test_switching_the_active_version_does_not_rewrite_either_timestamp(client):
+    """Activation is not an edit.
+
+    `updated_at` deliberately has no `onupdate`: a switch writes `is_active` on two
+    rows, and stamping both with "changed just now" would make the retired version
+    claim it had been edited, collapse the whole list to a single timestamp, and
+    reshuffle the order on every switch. Caught by reading the rendered list, where
+    both versions showed the same "Updated" time after one click.
+    """
+    old = await _routine(client, [WEEKDAY_BLOCK])
+    new = (await client.post("/api/routines", json={"name": "Second"})).json()["id"]
+
+    before = {r["id"]: r["updated_at"] for r in (await client.get("/api/routines")).json()}
+
+    await client.patch(f"/api/routines/{old}", json={"is_active": True})
+
+    after = {r["id"]: r["updated_at"] for r in (await client.get("/api/routines")).json()}
+    assert after[old] == before[old], "activating a version must not restamp it"
+    assert after[new] == before[new], "retiring a version must not restamp it"
+
+
+async def test_renaming_or_annotating_a_version_does_move_its_timestamp(client):
+    routine_id = (await client.post("/api/routines", json={"name": "One"})).json()["id"]
+    created = (await client.get(f"/api/routines/{routine_id}")).json()["updated_at"]
+
+    await client.patch(f"/api/routines/{routine_id}", json={"note": "why"})
+    after_note = (await client.get(f"/api/routines/{routine_id}")).json()["updated_at"]
+    assert after_note > created
+
+    await client.patch(f"/api/routines/{routine_id}", json={"name": "Two"})
+    assert (await client.get(f"/api/routines/{routine_id}")).json()["updated_at"] > after_note

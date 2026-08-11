@@ -1,4 +1,4 @@
-import type { PreviewResult, Routine, RoutineBlock } from './types'
+import type { NewRoutine, PreviewResult, Routine, RoutineBlock } from './types'
 import { apiGet, apiSend } from './client'
 
 export interface MaterializeResult {
@@ -11,8 +11,9 @@ export const listRoutines = () => apiGet<Routine[]>('/routines')
 
 export const getActiveRoutine = () => apiGet<Routine>('/routines/active')
 
-export const createRoutine = (body: Partial<Routine>) =>
-  apiSend<Routine>('POST', '/routines', body)
+// `NewRoutine` rather than `Partial<Routine>`: `copy_blocks_from_active` is a
+// request-only instruction, not a field a routine has.
+export const createRoutine = (body: NewRoutine) => apiSend<Routine>('POST', '/routines', body)
 
 export const updateRoutine = (id: number, body: Partial<Routine>) =>
   apiSend<Routine>('PATCH', `/routines/${id}`, body)

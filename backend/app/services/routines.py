@@ -28,8 +28,42 @@ def week_bounds(any_day: date) -> tuple[date, date]:
 
 
 async def list_routines(session: AsyncSession) -> list[Routine]:
-    stmt = select(Routine).order_by(Routine.id)
+    """Every version, most recently changed first — the order the version list shows.
+
+    `id desc` breaks ties: two versions created in the same clock tick (which the
+    tests do, and a fast double-click can) would otherwise come back in an
+    arbitrary order and the list would appear to shuffle between loads.
+    """
+    stmt = select(Routine).order_by(Routine.updated_at.desc(), Routine.id.desc())
     return list((await session.scalars(stmt)).all())
+
+
+async def _deactivate_others(session: AsyncSession, keep_id: int | None) -> None:
+    """Enforce at most one active routine.
+
+    Nothing in the schema enforces this, and before it was enforced here the
+    consequence was silent: `create_routine` defaulted `is_active=True` without
+    clearing anyone else, and `get_active_routine` then picked the highest id
+    among the actives. Creating a second routine therefore shadowed the first,
+    so week materialization read an empty routine and generated nothing —
+    with no error anywhere.
+    """
+    stmt = select(Routine).where(Routine.is_active.is_(True))
+    for other in (await session.scalars(stmt)).all():
+        if other.id != keep_id:
+            other.is_active = False
+
+
+async def touch_routine(session: AsyncSession, routine_id: int) -> None:
+    """Move a routine's `updated_at` because one of its blocks changed.
+
+    A block lives in its own table, so adding or editing one does not touch the
+    routine row and `onupdate` never fires. Without this the version list would
+    order by when a routine was last *renamed*, which is not what changed.
+    """
+    routine = await session.get(Routine, routine_id)
+    if routine is not None:
+        routine.updated_at = datetime.now()
 
 
 async def get_routine(session: AsyncSession, routine_id: int) -> Routine | None:
@@ -54,11 +88,39 @@ async def get_active_routine(session: AsyncSession) -> Routine | None:
 
 
 async def create_routine(session: AsyncSession, data: RoutineCreate) -> Routine:
-    routine = Routine(**data.model_dump())
+    fields = data.model_dump()
+    copy_blocks = fields.pop("copy_blocks_from_active")
+
+    source_blocks: list[RoutineBlock] = []
+    if copy_blocks:
+        # Read the source before adding the new routine: creating an active one
+        # deactivates the old active, which is exactly the routine we want to copy.
+        active = await get_active_routine(session)
+        if active is not None:
+            source_blocks = list(active.blocks)
+
+    routine = Routine(**fields)
     session.add(routine)
+    await session.flush()  # assigns routine.id, needed for the copied blocks
+
+    for block in source_blocks:
+        session.add(
+            RoutineBlock(
+                routine_id=routine.id,
+                days=list(block.days),
+                start_time=block.start_time,
+                end_time=block.end_time,
+                task_name=block.task_name,
+                tag_ids=list(block.tag_ids),
+                sort_order=block.sort_order,
+            )
+        )
+
+    if routine.is_active:
+        await _deactivate_others(session, keep_id=routine.id)
+
     await session.commit()
-    await session.refresh(routine)
-    return routine
+    return await get_routine(session, routine.id)
 
 
 async def update_routine(
@@ -67,8 +129,20 @@ async def update_routine(
     routine = await session.get(Routine, routine_id)
     if routine is None:
         return None
-    for key, value in data.model_dump(exclude_unset=True).items():
+    fields = data.model_dump(exclude_unset=True)
+    for key, value in fields.items():
         setattr(routine, key, value)
+
+    # Only a change to the version's own content moves `updated_at`. Activating or
+    # retiring a version is not an edit to it -- treating it as one would make every
+    # switch rewrite both rows' timestamps and destroy the ordering the list depends on.
+    if any(key in fields for key in ("name", "note")):
+        routine.updated_at = datetime.now()
+
+    # Activating this version is what retires whichever one was active before;
+    # that is the whole mechanism for switching back to an older version.
+    if routine.is_active:
+        await _deactivate_others(session, keep_id=routine.id)
     await session.commit()
     return await get_routine(session, routine_id)
 
@@ -90,6 +164,7 @@ async def create_block(
     await tag_service.assert_tags_exist(session, data.tag_ids)
     block = RoutineBlock(routine_id=routine_id, **data.model_dump())
     session.add(block)
+    await touch_routine(session, routine_id)
     await session.commit()
     await session.refresh(block)
     return block
@@ -106,6 +181,7 @@ async def update_block(
         await tag_service.assert_tags_exist(session, fields["tag_ids"])
     for key, value in fields.items():
         setattr(block, key, value)
+    await touch_routine(session, block.routine_id)
     await session.commit()
     await session.refresh(block)
     return block
@@ -115,7 +191,11 @@ async def delete_block(session: AsyncSession, block_id: int) -> bool:
     block = await session.get(RoutineBlock, block_id)
     if block is None:
         return False
+    # Read the parent id before the delete: afterwards `block` is detached and
+    # touching its attributes would raise rather than return the id.
+    routine_id = block.routine_id
     await session.delete(block)
+    await touch_routine(session, routine_id)
     await session.commit()
     return True
 

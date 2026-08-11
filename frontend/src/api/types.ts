@@ -52,12 +52,28 @@ export interface RoutineBlock {
   sort_order: number
 }
 
+/** One version of the weekly routine. At most one is active; the rest are history
+ *  you can read and switch back to. */
 export interface Routine {
   id: number
   name: string
+  note: string
   is_active: boolean
   created_at: string
+  /** Moves whenever the version changes, including when one of its blocks does.
+   *  This is what the version list sorts by. */
+  updated_at: string
   blocks: RoutineBlock[]
+}
+
+export interface NewRoutine {
+  name: string
+  note?: string
+  is_active?: boolean
+  /** Start this version from the active routine's blocks rather than empty. A new
+   *  version usually means "the current one, with a change", and starting empty is
+   *  how an active routine ends up with no blocks and silently generates nothing. */
+  copy_blocks_from_active?: boolean
 }
 
 export interface RuleGroup {
