@@ -8,6 +8,7 @@ import {
   findConflicts,
   formatBands,
   useCreateRuleVersion,
+  useUpdateRule,
 } from '../hooks/useRules'
 import { useTagMap, useTags } from '../hooks/useTags'
 import { Field } from './Field'
@@ -37,7 +38,18 @@ function ownerMap(groups: RuleGroup[], excludeTagIds: number[]): Map<number, Own
  * (`key={rule.id}`) once that happens, so a freshly created version starts its own,
  * unedited draft rather than inheriting stale local state.
  */
-export function RuleEditor({ rule, onSaved }: { rule: Rule; onSaved?: () => void }) {
+export function RuleEditor({
+  rule,
+  onSaved,
+  mode = 'newVersion',
+}: {
+  rule: Rule
+  onSaved?: () => void
+  /** `newVersion` posts a fresh version and leaves `rule` untouched (the original
+   *  behaviour). `edit` patches `rule` in place, so a named rule can be tuned
+   *  without forking. */
+  mode?: 'newVersion' | 'edit'
+}) {
   const tagsQuery = useTags()
   const tagMap = useTagMap()
   const tags = tagsQuery.data ?? []
@@ -50,6 +62,9 @@ export function RuleEditor({ rule, onSaved }: { rule: Rule; onSaved?: () => void
   const [note, setNote] = useState('')
 
   const createVersion = useCreateRuleVersion()
+  const updateVersion = useUpdateRule()
+  const editing = mode === 'edit'
+  const saving = editing ? updateVersion.isPending : createVersion.isPending
 
   const owners = ownerMap(groups, excludeTagIds)
   const conflicts = findConflicts(groups, excludeTagIds)
@@ -90,7 +105,10 @@ export function RuleEditor({ rule, onSaved }: { rule: Rule; onSaved?: () => void
 
   const openSaveModal = () => {
     createVersion.reset()
-    setNote('')
+    updateVersion.reset()
+    // Editing starts from the note this version already carries; a new version
+    // starts blank, because its note explains what changed relative to the old one.
+    setNote(editing ? rule.note : '')
     setNoteModalOpen(true)
   }
 
@@ -100,28 +118,33 @@ export function RuleEditor({ rule, onSaved }: { rule: Rule; onSaved?: () => void
 
   const confirmSave = () => {
     if (!note.trim()) return
-    createVersion.mutate(
-      {
-        name: rule.name,
-        groups,
-        tolerance: tolerancePct / 100,
-        exclude_tag_ids: excludeTagIds,
-        note: note.trim(),
+    const body = {
+      groups,
+      tolerance: tolerancePct / 100,
+      exclude_tag_ids: excludeTagIds,
+      note: note.trim(),
+    }
+    const settle = {
+      onSuccess: () => {
+        closeSaveModal()
+        onSaved?.()
       },
-      {
-        onSuccess: () => {
-          closeSaveModal()
-          onSaved?.()
-        },
-      },
-    )
+    }
+    if (editing) {
+      updateVersion.mutate({ id: rule.id, body }, settle)
+    } else {
+      createVersion.mutate({ name: rule.name, ...body }, settle)
+    }
   }
 
+  const active = editing ? updateVersion : createVersion
   const saveError =
-    createVersion.error instanceof ApiError
-      ? createVersion.error.detail
-      : createVersion.isError
-        ? 'Could not save the new version.'
+    active.error instanceof ApiError
+      ? active.error.detail
+      : active.isError
+        ? editing
+          ? 'Could not save this version.'
+          : 'Could not save the new version.'
         : null
 
   return (
@@ -232,11 +255,11 @@ export function RuleEditor({ rule, onSaved }: { rule: Rule; onSaved?: () => void
           </button>
           <button
             type="button"
-            disabled={!note.trim() || createVersion.isPending}
+            disabled={!note.trim() || saving}
             onClick={confirmSave}
             className="rounded-[8px] bg-[var(--pale)] px-3 py-1.5 text-sm font-medium text-ink transition-opacity hover:opacity-80 disabled:opacity-40"
           >
-            {createVersion.isPending ? 'Saving…' : 'Save version'}
+            {saving ? 'Saving…' : editing ? 'Save changes' : 'Save version'}
           </button>
         </div>
       </Modal>

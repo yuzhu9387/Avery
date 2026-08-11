@@ -18,8 +18,31 @@ export function useWeek(monday: Date) {
  *  `staleTime`) a false "0 minutes" snapshot against the still-empty week. Waiting
  *  for `useWeek` to settle first guarantees those events already committed. */
 export function useWeekRatios(monday: Date, enabled = true) {
-  const start = formatLocal(new Date(monday.getFullYear(), monday.getMonth(), monday.getDate()))
-  const end = formatLocal(addDays(monday, 7))
+  const { start, end } = weekRange(monday)
+  return usePeriodRatios(start, end, enabled)
+}
+
+/** The naive-local `[start, end)` bounds of the week beginning `monday`. */
+export function weekRange(monday: Date): { start: string; end: string } {
+  return {
+    start: formatLocal(new Date(monday.getFullYear(), monday.getMonth(), monday.getDate())),
+    end: formatLocal(addDays(monday, 7)),
+  }
+}
+
+/** The naive-local `[start, end)` bounds of the month containing `anyDay`. */
+export function monthRange(anyDay: Date): { start: string; end: string } {
+  const y = anyDay.getFullYear()
+  const m = anyDay.getMonth()
+  return { start: formatLocal(new Date(y, m, 1)), end: formatLocal(new Date(y, m + 1, 1)) }
+}
+
+/** Rule evaluation over an arbitrary period.
+ *
+ *  Exists because the Month view was rendering `useWeekRatios` — so the rail headed
+ *  its numbers "This week" and meant it, while sitting next to a month grid. The
+ *  period now comes from whichever page owns the view. */
+export function usePeriodRatios(start: string, end: string, enabled = true) {
   return useQuery({
     queryKey: qk.evaluate(start, end),
     queryFn: () => evaluatePeriod({ period_start: start, period_end: end }),

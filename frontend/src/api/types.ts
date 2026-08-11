@@ -83,6 +83,19 @@ export interface RuleGroup {
   tag_ids: number[]
 }
 
+/** A patch to an existing rule version. Ratios are editable in place so several
+ *  named rules ("chill life", "heavy work") can be kept and tuned rather than
+ *  forked on every tweak. `exclude_tag_ids` may only be sent together with
+ *  `groups` — the backend refuses it alone, because with no groups in the same
+ *  request there is nothing to check it against. */
+export interface RuleUpdate {
+  name?: string
+  note?: string
+  groups?: RuleGroup[]
+  tolerance?: number
+  exclude_tag_ids?: number[]
+}
+
 export interface Rule {
   id: number
   name: string

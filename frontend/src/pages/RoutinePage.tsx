@@ -609,7 +609,9 @@ function VersionRow({
       }}
     >
       <div className="flex items-center gap-2">
-        <div className="min-w-0 flex-1">
+        {/* Half width: at `flex-1` the name and note ran the entire row, so a
+         *  three-word name sat in a field wide enough for a sentence. */}
+        <div className="min-w-0 basis-1/2">
           <InlineText
             value={version.name}
             onCommit={onRename}
@@ -626,7 +628,7 @@ function VersionRow({
           />
         </div>
 
-        <div className="w-[104px] shrink-0 text-right text-[10px] leading-tight text-ink-faint">
+        <div className="ml-auto w-[104px] shrink-0 text-right text-[10px] leading-tight text-ink-faint">
           <div>
             {version.blocks.length} block{version.blocks.length === 1 ? '' : 's'} ·{' '}
             {formatMinutes(totalMinutes)}

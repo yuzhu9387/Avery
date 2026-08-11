@@ -92,13 +92,26 @@ async def create_rule_version(session: AsyncSession, data: RuleCreate) -> Rule:
 
 
 async def update_rule(session: AsyncSession, rule_id: int, data: RuleUpdate) -> Rule | None:
-    """Cosmetic-only: renames or re-annotates a version in place. Ratios/groups
-    stay immutable — `RuleUpdate` never carries them, so there is nothing here
-    that could disagree with a Report's snapshotted copy of this rule."""
+    """Edits a version in place — name, note, and the ratio definition itself.
+
+    A stored Report is unaffected: it snapshots its own `metrics` at generation time
+    and never reads its rule back, so changing the ratios here cannot rewrite a past
+    report's numbers. See `RuleUpdate` for the provenance trade this accepts.
+    """
     rule = await session.get(Rule, rule_id)
     if rule is None:
         return None
     fields = data.model_dump(exclude_unset=True)
+
+    # Same guard `create_rule_version` applies. Without it a patch could point a
+    # group at a tag id that does not exist, and the rule would evaluate forever
+    # against a group that can never match anything — with no error to explain why.
+    referenced = {
+        tag_id for group in fields.get("groups") or [] for tag_id in group["tag_ids"]
+    } | set(fields.get("exclude_tag_ids") or [])
+    if referenced:
+        await assert_tags_exist(session, sorted(referenced))
+
     for key, value in fields.items():
         setattr(rule, key, value)
     await session.commit()

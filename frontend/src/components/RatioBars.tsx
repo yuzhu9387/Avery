@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import type { GroupResult, Verdict } from '../api/types'
 import { VerdictPill } from './VerdictPill'
 import { formatMinutes } from '../lib/datetime'
@@ -20,10 +21,15 @@ export function RatioBars({
   groups,
   tolerance,
   compact = false,
+  hrefForGroup,
 }: {
   groups: GroupResult[]
   tolerance: number
   compact?: boolean
+  /** When supplied, each bar becomes a link to the events that make it up. Optional
+   *  so the same component still renders as a plain read-out where there is nowhere
+   *  to drill to (the Review page's report view). */
+  hrefForGroup?: (groupKey: string) => string
 }) {
   // The widest share across groups sets the scale, so a 60% band and a 10% band are
   // both legible instead of the small one collapsing to a sliver.
@@ -34,8 +40,12 @@ export function RatioBars({
       {groups.map((g) => {
         const lo = g.share_target * (1 - tolerance)
         const hi = g.share_target * (1 + tolerance)
-        return (
-          <div key={g.key}>
+        const href = hrefForGroup?.(g.key)
+        // Two concrete branches rather than one component-typed variable: a `to` that
+        // might be `undefined` does not satisfy `LinkProps`, and widening it would only
+        // move the error to runtime.
+        const body = (
+          <>
             <div className="mb-1 flex items-baseline justify-between gap-2">
               <span className="text-xs text-ink-muted truncate min-w-0">{g.label}</span>
               <span className="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-xs">
@@ -87,7 +97,19 @@ export function RatioBars({
                 {(lo * 100).toFixed(0)}–{(hi * 100).toFixed(0)}%
               </div>
             )}
-          </div>
+          </>
+        )
+        return href ? (
+          <Link
+            key={g.key}
+            to={href}
+            title={`Show the events behind ${g.label}`}
+            className="block rounded-[6px] transition-colors hover:bg-[var(--pale)]/60"
+          >
+            {body}
+          </Link>
+        ) : (
+          <div key={g.key}>{body}</div>
         )
       })}
     </div>

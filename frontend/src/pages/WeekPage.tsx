@@ -20,7 +20,7 @@ import { useGridZoom } from '../hooks/useGridZoom'
 import { useHideRoutine } from '../hooks/useHideRoutine'
 import { useTagMap, useTags } from '../hooks/useTags'
 import { useTagVisibility } from '../hooks/useTagVisibility'
-import { useWeek, useWeekRatios } from '../hooks/useWeek'
+import { useWeek, useWeekRatios, weekRange } from '../hooks/useWeek'
 import { addDays, formatDate, mondayOf } from '../lib/datetime'
 import { minutesToPx } from '../lib/geometry'
 import { isEventVisible } from '../lib/tagVisibility'
@@ -144,6 +144,10 @@ export default function WeekPage() {
           selectedWeekStart={monday}
           onPickDay={(day) => setMonday(mondayOf(day))}
           ratios={ratios}
+          view="week"
+          periodLabel="This week"
+          periodStart={weekRange(monday).start}
+          periodEnd={weekRange(monday).end}
           tags={selectableTags}
           hidden={hidden}
           onToggle={toggle}

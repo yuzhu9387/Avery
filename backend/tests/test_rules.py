@@ -46,17 +46,97 @@ async def test_new_version_closes_previous(client):
     assert active.json()["id"] == second.json()["id"]
 
 
-async def test_rule_ratios_and_groups_are_never_mutated_in_place(client):
-    """A version's ratios/groups are immutable — a new commitment is a new version,
-    never an edit to this one — because a stored Report snapshots the rule it was
-    measured against, and rewriting the ratios here would silently rewrite history
-    those Reports already rendered. PATCH exists (below), but only for the cosmetic
-    fields (name/note); anything that would touch the ratio math is a 422."""
+async def test_a_rule_version_can_be_edited_in_place(client):
+    """A version's ratios are editable, so several named rules ("chill life",
+    "heavy work") can be kept and tuned rather than forked on every tweak.
+
+    This replaces an earlier test that asserted the opposite. The immutability it
+    protected was aimed at stored Reports, but a Report snapshots its own `metrics`
+    at generation time and never reads its rule back — so editing a rule cannot
+    rewrite a past report's numbers. The cost is provenance only, and it is accepted
+    deliberately; see `RuleUpdate`.
+    """
     await _seed_tags(client)
     rule_id = (await client.post("/api/rules", json=RULE_BODY)).json()["id"]
-    assert (await client.patch(f"/api/rules/{rule_id}", json={"tolerance": 0.9})).status_code == 422
+
+    tightened = await client.patch(f"/api/rules/{rule_id}", json={"tolerance": 0.05})
+    assert tightened.status_code == 200
+    assert tightened.json()["tolerance"] == 0.05
+
+    reshaped = await client.patch(
+        f"/api/rules/{rule_id}",
+        json={
+            "name": "Chill life",
+            "groups": [
+                {"key": "A", "label": "Work", "ratio": 3.0, "tag_ids": [1]},
+                {"key": "B", "label": "Rest & play", "ratio": 7.0, "tag_ids": [2]},
+            ],
+            "exclude_tag_ids": [],
+        },
+    )
+    assert reshaped.status_code == 200
+    assert [g["ratio"] for g in reshaped.json()["groups"]] == [3.0, 7.0]
+    assert reshaped.json()["name"] == "Chill life"
+
+    # Still one version, not a fork.
+    assert len((await client.get("/api/rules")).json()) == 1
+
+
+async def test_editing_a_version_still_enforces_the_coherence_rules(client):
+    """Editing must not be a way around the checks `POST` applies."""
+    await _seed_tags(client)
+    rule_id = (await client.post("/api/rules", json=RULE_BODY)).json()["id"]
+    patch = lambda body: client.patch(f"/api/rules/{rule_id}", json=body)  # noqa: E731
+
+    # The same tag in two groups.
     assert (
-        await client.patch(f"/api/rules/{rule_id}", json={"groups": RULE_BODY["groups"]})
+        await patch(
+            {
+                "groups": [
+                    {"key": "A", "label": "One", "ratio": 1.0, "tag_ids": [1]},
+                    {"key": "B", "label": "Two", "ratio": 1.0, "tag_ids": [1]},
+                ]
+            }
+        )
+    ).status_code == 422
+
+    # Duplicate group keys.
+    assert (
+        await patch(
+            {
+                "groups": [
+                    {"key": "A", "label": "One", "ratio": 1.0, "tag_ids": [1]},
+                    {"key": "A", "label": "Two", "ratio": 1.0, "tag_ids": [2]},
+                ]
+            }
+        )
+    ).status_code == 422
+
+    # A tag both grouped and excluded.
+    assert (
+        await patch(
+            {
+                "groups": [{"key": "A", "label": "One", "ratio": 1.0, "tag_ids": [1]}],
+                "exclude_tag_ids": [1],
+            }
+        )
+    ).status_code == 422
+
+    # A group pointing at a tag that does not exist. Without the service-side check
+    # this would save, and the group would then evaluate against nothing for ever
+    # with no error to explain why.
+    assert (
+        await patch({"groups": [{"key": "A", "label": "One", "ratio": 1.0, "tag_ids": [9999]}]})
+    ).status_code in (404, 422)
+
+    # `exclude_tag_ids` alone cannot be patched: with no groups in the same request
+    # there is nothing to check it against, which would be the way to smuggle a tag
+    # into both a group and the exclude list.
+    assert (await patch({"exclude_tag_ids": [1]})).status_code == 422
+
+    # A ratio of zero is still rejected on edit, as it is on create.
+    assert (
+        await patch({"groups": [{"key": "A", "label": "One", "ratio": 0, "tag_ids": [1]}]})
     ).status_code == 422
 
 
@@ -70,7 +150,7 @@ async def test_patch_renames_and_re_annotates_a_rule_version(client):
     assert renamed.status_code == 200
     assert renamed.json()["name"] == "Renamed"
     assert renamed.json()["note"] == "why this changed"
-    # Ratios/groups are untouched by a cosmetic patch.
+    # A patch that carries only name/note leaves the ratios alone.
     assert renamed.json()["groups"] == RULE_BODY["groups"]
 
     # A note/description may legitimately be cleared; a name may not.

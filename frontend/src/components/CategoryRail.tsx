@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useRef, useState } from 'react'
 
@@ -22,6 +23,7 @@ export function CategoryRail({
   onToggle,
   hideRoutine,
   onToggleHideRoutine,
+  hrefForTag,
 }: {
   tags: Tag[]
   minutesByTag: Record<string, number>
@@ -33,6 +35,10 @@ export function CategoryRail({
   // only ever affect which tags draw.
   hideRoutine: boolean
   onToggleHideRoutine: () => void
+  /** When supplied, a category's total links to the events behind it. Attached to the
+   *  minutes rather than the name because the name already opens the category editor
+   *  — replacing that would have taken editing away to add drilling. */
+  hrefForTag?: (tagId: number) => string
 }) {
   const queryClient = useQueryClient()
   const railRef = useRef<HTMLDivElement>(null)
@@ -169,9 +175,19 @@ export function CategoryRail({
                   {tag.name}
                 </span>
               </button>
-              <span className="shrink-0 text-[10px] tabular-nums text-ink-faint">
-                {formatMinutes(minutes)}
-              </span>
+              {hrefForTag ? (
+                <Link
+                  to={hrefForTag(tag.id)}
+                  title={`Show the ${tag.name} events behind this`}
+                  className="shrink-0 rounded-[4px] px-1 text-[10px] tabular-nums text-ink-faint transition-colors hover:bg-[var(--pale)] hover:text-ink"
+                >
+                  {formatMinutes(minutes)}
+                </Link>
+              ) : (
+                <span className="shrink-0 text-[10px] tabular-nums text-ink-faint">
+                  {formatMinutes(minutes)}
+                </span>
+              )}
               <button
                 type="button"
                 className="shrink-0 text-xs font-bold leading-none text-ink-faint transition-colors hover:text-[var(--over)] disabled:opacity-50"

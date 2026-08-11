@@ -63,6 +63,8 @@ export default function RulesPage() {
 
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [editorOpen, setEditorOpen] = useState(false)
+  // 'newVersion' forks; 'edit' tunes the version on screen in place.
+  const [editorMode, setEditorMode] = useState<'newVersion' | 'edit'>('newVersion')
   const [armedDeleteId, setArmedDeleteId] = useState<number | null>(null)
   const [deleteError, setDeleteError] = useState<{ id: number; message: string } | null>(null)
   const [starterError, setStarterError] = useState<string | null>(null)
@@ -144,6 +146,10 @@ export default function RulesPage() {
           version={selected}
           onRename={(name) => selected && updateRule.mutate({ id: selected.id, body: { name } })}
           onNote={(note) => selected && updateRule.mutate({ id: selected.id, body: { note } })}
+          onEditRatios={() => {
+            setEditorMode('edit')
+            setEditorOpen(true)
+          }}
         />
       )}
       {updateRule.isError && (
@@ -157,7 +163,10 @@ export default function RulesPage() {
             type="button"
             disabled={!selected}
             title={selected ? undefined : 'Create the starter rule first.'}
-            onClick={() => setEditorOpen(true)}
+            onClick={() => {
+              setEditorMode('newVersion')
+              setEditorOpen(true)
+            }}
             className="shrink-0 rounded-[8px] bg-[var(--pale)] px-3 py-1.5 text-xs font-medium text-ink transition-opacity hover:opacity-80 disabled:opacity-40"
           >
             New version
@@ -188,11 +197,17 @@ export default function RulesPage() {
         )}
       </section>
 
-      <Modal open={editorOpen} onClose={() => setEditorOpen(false)} title="New version">
+      <Modal
+        open={editorOpen}
+        onClose={() => setEditorOpen(false)}
+        title={editorMode === 'edit' ? `Edit ${selected?.name ?? 'version'}` : 'New version'}
+      >
         {/* Bases the new version's starting groups/tolerance/exclusions on whichever
          *  version is currently on screen (not necessarily the active one), so a new
          *  commitment can fork off any point in the history, not just the incumbent. */}
-        {selected && <RuleEditor rule={selected} onSaved={() => setEditorOpen(false)} />}
+        {selected && (
+          <RuleEditor rule={selected} mode={editorMode} onSaved={() => setEditorOpen(false)} />
+        )}
       </Modal>
     </div>
   )
@@ -207,10 +222,15 @@ function Display({
   version,
   onRename,
   onNote,
+  onEditRatios,
 }: {
   version: Rule | null
   onRename: (name: string) => void
   onNote: (note: string) => void
+  /** Opens the ratio editor for the version on screen. Lives here rather than in the
+   *  Versions header below, because it acts on *this* panel's version — next to the
+   *  bands it changes, not next to the list of other versions. */
+  onEditRatios: () => void
 }) {
   if (!version) return null
 
@@ -251,14 +271,23 @@ function Display({
             className="text-[11px] leading-tight text-ink-faint"
           />
         </div>
-        {isActive && (
-          <span
-            className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-ink"
-            style={{ background: 'var(--surface-raised)' }}
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          {isActive && (
+            <span
+              className="rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-ink"
+              style={{ background: 'var(--surface-raised)' }}
+            >
+              On air
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={onEditRatios}
+            className="rounded-full bg-[var(--surface)] px-2.5 py-1 text-[11px] font-medium text-ink transition-opacity hover:opacity-80"
           >
-            On air
-          </span>
-        )}
+            Edit ratios
+          </button>
+        </div>
       </div>
 
       <div className="rounded-[11px] border border-line bg-surface p-2.5 sm:p-3">
@@ -429,42 +458,53 @@ function VersionRow({
         boxShadow: isShowing ? 'inset 3px 0 0 0 var(--sage)' : undefined,
       }}
     >
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-2">
+      {/* Name on the left at a fixed half width, everything else pushed to the right
+       *  edge by the `ml-auto` group, whitespace between them. The badge, the dates,
+       *  the ratios and delete used to be scattered across the row — one tucked
+       *  beside the name, one on a line of its own — so nothing lined up down the
+       *  card's right side. */}
+      <div className="flex items-start gap-3">
+        <div className="min-w-0 basis-1/2">
           <InlineText
             value={rule.name}
             onCommit={onRename}
             ariaLabel={`Name of ${rule.name}`}
             className="text-sm font-medium text-ink"
           />
+          <InlineText
+            value={rule.note}
+            onCommit={onNote}
+            allowEmpty
+            placeholder="Add a note"
+            ariaLabel={`Note on ${rule.name}`}
+            className="text-xs text-ink-muted"
+          />
+        </div>
+
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          <div className="text-right text-[10px] leading-tight text-ink-faint">
+            <div>{ratios}</div>
+            <div>
+              {rule.effective_from} – {rule.effective_to ?? 'present'}
+            </div>
+          </div>
           {active && (
             <span
-              className="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium text-white"
+              className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-white"
               style={{ background: 'var(--pass)' }}
             >
               active
             </span>
           )}
+          <VersionDeleteButton
+            armed={deleteArmed}
+            pending={deleting}
+            label={rule.name}
+            onArm={onArmDelete}
+            onConfirm={onConfirmDelete}
+          />
         </div>
-        <VersionDeleteButton
-          armed={deleteArmed}
-          pending={deleting}
-          label={rule.name}
-          onArm={onArmDelete}
-          onConfirm={onConfirmDelete}
-        />
       </div>
-      <div className="text-xs text-ink-faint">
-        {rule.effective_from} – {rule.effective_to ?? 'present'} · {ratios}
-      </div>
-      <InlineText
-        value={rule.note}
-        onCommit={onNote}
-        allowEmpty
-        placeholder="Add a note"
-        ariaLabel={`Note on ${rule.name}`}
-        className="text-xs text-ink-muted"
-      />
       {deleteError && <div className="text-xs text-[var(--over)]">{deleteError}</div>}
     </li>
   )

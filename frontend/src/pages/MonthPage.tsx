@@ -18,7 +18,7 @@ import { useHideRoutine } from '../hooks/useHideRoutine'
 import { useMonth } from '../hooks/useMonth'
 import { useTagMap, useTags } from '../hooks/useTags'
 import { useTagVisibility } from '../hooks/useTagVisibility'
-import { useWeek, useWeekRatios } from '../hooks/useWeek'
+import { monthRange, usePeriodRatios, useWeek } from '../hooks/useWeek'
 import { addDays, formatDate, formatLocal, formatMinutes, formatTimeRange, mondayOf, parseLocal } from '../lib/datetime'
 import { isEventVisible } from '../lib/tagVisibility'
 import { type MonthCell, buildCells } from '../lib/monthGrid'
@@ -58,7 +58,10 @@ export default function MonthPage() {
   // stable across this component's own re-renders, matching WeekPage's pattern.
   const [thisWeekMonday] = useState(() => mondayOf(new Date()))
   const week = useWeek(thisWeekMonday)
-  const ratios = useWeekRatios(thisWeekMonday, week.isSuccess)
+  // The month on screen, not the current week: the rail sits beside a month grid, so
+  // its heading and its numbers both have to be monthly (item 4).
+  const period = monthRange(viewMonth)
+  const ratios = usePeriodRatios(period.start, period.end, week.isSuccess)
   const tags = useTags()
   const selectableTags = useMemo(() => (tags.data ?? []).filter((t) => !t.archived), [tags.data])
   const selectableTagIds = useMemo(
@@ -157,6 +160,10 @@ export default function MonthPage() {
           // whatever week WeekPage was last showing is a known limitation.
           onPickDay={() => navigate('/')}
           ratios={ratios}
+          view="month"
+          periodLabel="This month"
+          periodStart={period.start}
+          periodEnd={period.end}
           tags={selectableTags}
           hidden={hidden}
           onToggle={toggle}

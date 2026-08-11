@@ -4,7 +4,7 @@ import type { QueryClient } from '@tanstack/react-query'
 import { ApiError } from '../api/client'
 import { createRuleVersion, deleteRule, getActiveRule, listRules, updateRule } from '../api/rules'
 import { qk } from '../api/keys'
-import type { Rule } from '../api/types'
+import type { Rule, RuleUpdate } from '../api/types'
 
 export function useActiveRule() {
   return useQuery({
@@ -56,7 +56,7 @@ export function useDeleteRule() {
 export function useUpdateRule() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ id, body }: { id: number; body: { name?: string; note?: string } }) =>
+    mutationFn: ({ id, body }: { id: number; body: RuleUpdate }) =>
       updateRule(id, body),
     onSuccess: () => invalidateRuleEffects(queryClient),
   })

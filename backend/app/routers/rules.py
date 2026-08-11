@@ -40,7 +40,13 @@ async def get_rule(rule_id: int, session: AsyncSession = Depends(get_session)):
 
 @router.patch("/{rule_id}", response_model=RuleOut)
 async def update_rule(rule_id: int, data: RuleUpdate, session: AsyncSession = Depends(get_session)):
-    rule = await service.update_rule(session, rule_id, data)
+    # A patch can now carry `groups`, so it can name a tag that does not exist —
+    # exactly as POST can, and it needs the same translation. Without this the
+    # service's `UnknownTagIds` escapes as a 500.
+    try:
+        rule = await service.update_rule(session, rule_id, data)
+    except UnknownTagIds as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"unknown tag ids: {exc}")
     if rule is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "rule not found")
     return rule

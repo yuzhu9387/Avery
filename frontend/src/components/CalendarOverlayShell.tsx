@@ -1,7 +1,8 @@
 import { useEffect } from 'react'
-import { Outlet, useLocation, useNavigate, useOutletContext } from 'react-router-dom'
+import { Outlet, useLocation, useNavigate, useOutletContext, useSearchParams } from 'react-router-dom'
 
 import type { HeaderSlot } from '../App'
+import MonthPage from '../pages/MonthPage'
 import WeekPage from '../pages/WeekPage'
 import { IconRoutine, IconRules, IconTasks } from './icons'
 
@@ -19,6 +20,7 @@ const TITLES: Record<string, { Icon: IconComponent | null; label: string }> = {
  *  glyphs for Tasks/Routine/Rules). */
 function metaFor(pathname: string): { Icon: IconComponent | null; label: string } {
   if (TITLES[pathname]) return TITLES[pathname]
+  if (pathname === '/events') return { Icon: null, label: 'Events' }
   if (pathname.startsWith('/events/')) return { Icon: null, label: 'Event' }
   if (pathname.startsWith('/tasks/')) return { Icon: null, label: 'Task' }
   return { Icon: null, label: '' }
@@ -35,8 +37,8 @@ function metaFor(pathname: string): { Icon: IconComponent | null; label: string 
  * opaque `var(--surface)` background, so the week grid underneath no longer shows
  * through (a section swap, the same way the Month view replaces the week view).
  *
- * Positioning: the panel is anchored with `left-56`, exactly matching
- * `CalendarSidebar`'s own `w-56` — so it never covers the rail — collapsing to
+ * Positioning: the panel is anchored with `left-64`, exactly matching
+ * `CalendarSidebar`'s own `w-64` — so it never covers the rail — collapsing to
  * `left-0` when the rail is closed. That state comes from `useOutletContext`,
  * the same `{ railOpen }` App already threads through its own `Outlet` — this
  * component is a plain (non-route) child of *that* provider, so the context reads
@@ -51,8 +53,14 @@ export function CalendarOverlayShell() {
   const { railOpen } = useOutletContext<HeaderSlot>()
   const navigate = useNavigate()
   const location = useLocation()
+  const [params] = useSearchParams()
 
-  const close = () => navigate('/')
+  // Which calendar stays behind the panel. The overlay paths (/events, /tasks,
+  // /routine, /rules) say nothing about it, so the rail stamps `?view=month` onto
+  // its links and this reads it back — without that, opening anything from the month
+  // view swapped the backdrop to the week grid and threw the user out of the month.
+  const view = params.get('view') === 'month' ? 'month' : 'week'
+  const close = () => navigate(view === 'month' ? '/month' : '/')
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -70,7 +78,7 @@ export function CalendarOverlayShell() {
 
   return (
     <div className="relative h-full min-h-0">
-      <WeekPage />
+      {view === 'month' ? <MonthPage /> : <WeekPage />}
 
       <div
         // `z-[60]`, not `z-40`. WeekGrid's sticky chrome climbs to z-50 (its top-left
@@ -80,7 +88,7 @@ export function CalendarOverlayShell() {
         // every page opened on top of the calendar. The overlay is the modal surface,
         // so it is the thing that must be raised; lowering the grid's sticky layers
         // would put dragged cards back on top of the header they scroll under.
-        className={['absolute inset-0 z-[60] flex flex-col', railOpen ? 'left-56' : 'left-0'].join(
+        className={['absolute inset-0 z-[60] flex flex-col', railOpen ? 'left-64' : 'left-0'].join(
           ' ',
         )}
         style={{ background: 'var(--surface)' }}

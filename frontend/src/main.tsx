@@ -6,6 +6,7 @@ import { RouterProvider, createBrowserRouter } from 'react-router-dom'
 import App from './App'
 import { CalendarOverlayShell } from './components/CalendarOverlayShell'
 import EventDetailPage from './pages/EventDetailPage'
+import EventsListPage from './pages/EventsListPage'
 import MonthPage from './pages/MonthPage'
 import RoutinePage from './pages/RoutinePage'
 import RulesPage from './pages/RulesPage'
@@ -32,6 +33,7 @@ const router = createBrowserRouter([
       {
         element: <CalendarOverlayShell />,
         children: [
+          { path: 'events', element: <EventsListPage /> },
           { path: 'tasks', element: <TasksPage /> },
           { path: 'routine', element: <RoutinePage /> },
           { path: 'rules', element: <RulesPage /> },
