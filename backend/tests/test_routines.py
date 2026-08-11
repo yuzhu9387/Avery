@@ -68,7 +68,9 @@ async def test_materialize_is_idempotent(client):
     assert (await client.post("/api/weeks/2026-08-03/materialize")).json()["created"] == 0
 
 
-async def test_materialize_reuses_one_task_across_the_week(client):
+async def test_materialize_mints_no_tasks(client):
+    """Routine-born events carry their own title (the block's task_name) and are
+    identified by routine_block_id — they no longer mint or reuse a Task."""
     await _routine(client, [WEEKDAY_BLOCK])
     await client.post("/api/weeks/2026-08-03/materialize")
     events = (
@@ -76,7 +78,12 @@ async def test_materialize_reuses_one_task_across_the_week(client):
             "/api/events", params={"start": "2026-08-03T00:00:00", "end": "2026-08-10T00:00:00"}
         )
     ).json()
-    assert len({e["task_id"] for e in events}) == 1
+    assert len(events) == 5
+    assert all(e["task_id"] is None for e in events)
+    assert all(e["title"] == "Work" for e in events)
+
+    tasks = (await client.get("/api/tasks")).json()
+    assert not any(t["name"] == "Work" for t in tasks)
 
 
 async def test_materialized_events_are_tagged_as_routine_source(client):
@@ -150,7 +157,8 @@ async def test_week_is_materialized_in_a_single_commit(client, session):
 
     assert result.json()["created"] == 12  # 5 weekday + 7 overnight
 
-    # Task rows commit first (one per distinct name); every Event appears in one step.
+    # No Task rows are minted anymore, so this is now literally one commit: every
+    # Event appears in the same step.
     jumps = [b - a for a, b in zip([0, *committed], committed)]
     assert max(jumps) == 12, f"events arrived in multiple commits: {committed}"
 

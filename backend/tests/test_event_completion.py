@@ -35,12 +35,16 @@ async def test_unknown_kind_is_rejected(client):
     assert bad.status_code == 422
 
 
-async def test_two_event_cards_with_one_name_share_a_task(client):
+async def test_two_event_cards_with_one_name_carry_no_task(client):
+    """Plain event cards (kind='event') no longer mint or reuse a Task by name —
+    each stands on its own, carrying its own title."""
     a = await _event(client, name="Standup", start="2026-08-03T09:00:00",
                      end="2026-08-03T09:15:00")
     b = await _event(client, name="Standup", start="2026-08-04T09:00:00",
                      end="2026-08-04T09:15:00")
-    assert a["task_id"] == b["task_id"]
+    assert a["task_id"] is None
+    assert b["task_id"] is None
+    assert a["title"] == b["title"] == "Standup"
 
 
 async def test_task_card_creation_sets_the_minted_tasks_due_date_to_the_event_end_date(client):
@@ -100,11 +104,17 @@ async def test_completing_a_task_card_marks_its_task_done(client):
     assert task["completed_at"] is None
 
 
-async def test_completing_an_event_card_leaves_its_task_alone(client):
+async def test_completing_an_event_card_has_no_task_to_touch(client):
+    """A plain event card has no task_id at all, so completing it cannot sync
+    (or accidentally mint) any task."""
     event = await _event(client, name="Dentist")
-    await client.post(f"/api/events/{event['id']}/complete")
-    task = (await client.get(f"/api/tasks/{event['task_id']}")).json()
-    assert task["status"] == "todo"
+    assert event["task_id"] is None
+    completed = await client.post(f"/api/events/{event['id']}/complete")
+    assert completed.status_code == 200
+    assert completed.json()["task_id"] is None
+
+    tasks = (await client.get("/api/tasks")).json()
+    assert not any(t["name"] == "Dentist" for t in tasks)
 
 
 async def test_uncompleting_does_not_resurrect_an_archived_task(client):

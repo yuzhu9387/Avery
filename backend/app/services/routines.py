@@ -14,7 +14,6 @@ from app.schemas.routine import (
 )
 from app.services import events as event_service
 from app.services import tags as tag_service
-from app.services import tasks as task_service
 
 
 class NoActiveRoutine(Exception):
@@ -236,6 +235,29 @@ async def _days_with_events(session: AsyncSession, monday: date, next_monday: da
     }
 
 
+async def _resolve_inherited_tags(
+    session: AsyncSession, task_name: str, cache: dict[str, list[int]]
+) -> list[int]:
+    """Tags a block with no tags of its own inherits from a same-named Task.
+
+    Read-only — never creates a Task. Materialization stopped minting Tasks for
+    routine blocks, but a task of that name may still exist (created by hand, or
+    a leftover from before this change), and its tags are still the fallback a
+    block with none of its own should pick up. Archived tasks are skipped: an
+    archived task's tags must not leak into newly materialized events.
+    """
+    if task_name not in cache:
+        existing = (
+            await session.scalars(
+                select(Task)
+                .where(Task.name == task_name, Task.status != TaskStatus.ARCHIVED)
+                .order_by(Task.id)
+            )
+        ).first()
+        cache[task_name] = list(existing.tag_ids) if existing else []
+    return list(cache[task_name])
+
+
 async def preview_week(
     session: AsyncSession, any_day: date, routine: Routine | None = None
 ) -> tuple[date, list[dict]] | None:
@@ -253,25 +275,15 @@ async def preview_week(
     monday, next_monday = week_bounds(any_day)
     occupied = await _days_with_events(session, monday, next_monday)
 
-    # Mirror materialize_week's tag fallback: a block declaring no tags of its own
-    # inherits the resolved task's. Resolve read-only — never create — so preview stays
-    # a pure read while still predicting the tags materialization will really assign.
-    # Archived tasks are skipped for the same reason find_or_create_by_name skips them.
+    # Mirrors materialize_week's tag fallback: a block declaring no tags of its own
+    # inherits a same-named task's, resolved read-only so preview stays a pure read
+    # while still predicting the tags materialization will really assign.
     task_tags: dict[str, list[int]] = {}
 
     async def tags_for(block: RoutineBlock) -> list[int]:
         if block.tag_ids:
             return list(block.tag_ids)
-        if block.task_name not in task_tags:
-            existing = (
-                await session.scalars(
-                    select(Task)
-                    .where(Task.name == block.task_name, Task.status != TaskStatus.ARCHIVED)
-                    .order_by(Task.id)
-                )
-            ).first()
-            task_tags[block.task_name] = list(existing.tag_ids) if existing else []
-        return list(task_tags[block.task_name])
+        return await _resolve_inherited_tags(session, block.task_name, task_tags)
 
     rows: list[dict] = []
     for offset in range(7):
@@ -306,6 +318,11 @@ async def materialize_week(
     Days that already hold any event are skipped entirely, so materialization never
     merges into a day the user has already touched, and a re-run is a no-op.
 
+    Routine-born events mint no Task: they carry their own title (the block's
+    task_name) and routine_block_id identifies them, so there is nothing left for
+    a Task to do here except (read-only) donate its tags to an untagged block —
+    see `_resolve_inherited_tags`.
+
     **The whole week's events land in a single commit.** Committing per event would
     let an interrupted run leave a day half-filled — and because the guard above skips
     any day holding *any* event, that day would then be skipped forever, permanently
@@ -330,33 +347,20 @@ async def materialize_week(
             if day.isoweekday() in block.days:
                 wanted.append((day, block))
 
-    # Resolve every task name FIRST. find_or_create_by_name commits, and a commit
-    # flushes whatever else is pending in the session — so no Event may exist in the
-    # session while these run, or the "single commit" guarantee is silently broken.
-    tasks_by_name: dict[str, Task] = {}
-    for _, block in wanted:
-        if block.task_name not in tasks_by_name:
-            tasks_by_name[block.task_name] = await task_service.find_or_create_by_name(
-                session, block.task_name, list(block.tag_ids)
-            )
-
+    tag_cache: dict[str, list[int]] = {}
     created: list[Event] = []
     for day, block in wanted:
-        task = tasks_by_name[block.task_name]
         start = datetime.combine(day, block.start_time)
         end = datetime.combine(day, block.end_time)
         if end <= start:  # crosses midnight
             end += timedelta(days=1)
         event = Event(
-            task_id=task.id,
+            task_id=None,
             title=block.task_name,
             start_at=start,
             end_at=end,
-            # Mirrors create_event: a block carrying no tags of its own inherits the
-            # task's. Building Event directly is exactly where this fallback gets
-            # lost, and an untagged event falls into "unassigned" — silently absent
-            # from every 6:3:1 ratio rather than visibly wrong.
-            tag_ids=list(block.tag_ids) or list(task.tag_ids),
+            tag_ids=list(block.tag_ids)
+            or await _resolve_inherited_tags(session, block.task_name, tag_cache),
             source=EventSource.ROUTINE,
             routine_block_id=block.id,
         )

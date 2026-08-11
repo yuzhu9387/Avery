@@ -43,37 +43,43 @@ async def get_event(session: AsyncSession, event_id: int) -> Event | None:
 
 async def create_event(session: AsyncSession, data: EventCreate) -> Event:
     tag_ids = list(data.tag_ids)
-    # Validate explicit tag ids before find_or_create_by_name can commit a new Task —
+    # Validate explicit tag ids before create_by_name can commit a new Task —
     # otherwise a typo'd tag id leaves a real Task row behind even though the event
     # creation itself 422s.
     if tag_ids:
         await assert_tags_exist(session, tag_ids)
+
+    task: Task | None = None
     if data.task_id is not None:
+        # Either scheduling an existing to-do (kind='event') or a kind='task' card
+        # naming a task explicitly — either way, honour the caller's task as-is.
         task = await session.get(Task, data.task_id)
         if task is None:
             raise TaskNotFound(f"task {data.task_id} not found")
     elif data.kind == EventKind.TASK:
         # A task card is 1:1 with its Task so completion can sync without two cards
-        # fighting over one status. Event cards keep reusing a Task by name, so
-        # repeated "Standup" blocks still roll up to a single task's minutes. The
-        # freshly minted Task's due date defaults to the card's own end date — a
-        # task card is a to-do with a slot, so the slot's end is naturally when
-        # it's due, rather than leaving it undated until the user sets one by hand.
+        # fighting over one status. The freshly minted Task's due date defaults to
+        # the card's own end date — a task card is a to-do with a slot, so the
+        # slot's end is naturally when it's due, rather than leaving it undated
+        # until the user sets one by hand.
         task = await task_service.create_by_name(
             session, data.task_name, tag_ids, due_date=data.end_at.date()
         )
-    else:
-        task = await task_service.find_or_create_by_name(session, data.task_name, tag_ids)
-    if not tag_ids:
+    # else: a plain event (kind='event') named without a task_id mints nothing —
+    # it carries its own title and stands on its own, task stays None.
+
+    if not tag_ids and task is not None:
         tag_ids = list(task.tag_ids)
 
     # title falls back to the caller's task_name, then to the resolved task's own
     # name -- the latter covers the explicit-task_id path, which never supplies
-    # task_name at all.
-    title = data.title or data.task_name or task.name
+    # task_name at all. One of data.title/task_name/task is guaranteed non-empty
+    # here: the schema requires task_id or task_name, and task_id resolves to a
+    # real task above.
+    title = data.title or data.task_name or (task.name if task is not None else "")
 
     event = Event(
-        task_id=task.id,
+        task_id=task.id if task is not None else None,
         title=title,
         start_at=data.start_at,
         end_at=data.end_at,
@@ -108,7 +114,8 @@ async def update_event(session: AsyncSession, event_id: int, data: EventUpdate) 
         raise ValueError("end_at must be after start_at")
 
     if fields.get("tag_ids") == []:
-        task = await session.get(Task, event.task_id)
+        # A task-less plain event has nothing to inherit from; [] just stays [].
+        task = await session.get(Task, event.task_id) if event.task_id is not None else None
         if task is not None:
             fields["tag_ids"] = list(task.tag_ids)
     elif "tag_ids" in fields:
@@ -149,7 +156,7 @@ async def complete_event(session: AsyncSession, event_id: int) -> Event | None:
         return None
     if event.completed_at is None:
         event.completed_at = datetime.now()
-    if event.kind == EventKind.TASK:
+    if event.task_id is not None:
         task = await session.get(Task, event.task_id)
         # An archived task stays archived: completion must not un-archive it.
         if task is not None and task.status != TaskStatus.ARCHIVED:
@@ -165,7 +172,7 @@ async def uncomplete_event(session: AsyncSession, event_id: int) -> Event | None
     if event is None:
         return None
     event.completed_at = None
-    if event.kind == EventKind.TASK:
+    if event.task_id is not None:
         task = await session.get(Task, event.task_id)
         # Guarded on DONE rather than "not archived": reopening a card must not drag
         # an archived task back into the active list.

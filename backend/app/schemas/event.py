@@ -56,7 +56,7 @@ class EventOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    task_id: int
+    task_id: int | None
     title: str
     start_at: datetime
     end_at: datetime

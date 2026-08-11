@@ -22,8 +22,12 @@ class Event(Base):
     __tablename__ = "events"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    task_id: Mapped[int] = mapped_column(
-        ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False, index=True
+    # NULL for a plain event (kind='event') that was created by name or by a
+    # routine block: those no longer mint or reuse a Task. Still set for a
+    # kind='task' card (1:1 with its Task) and for an event explicitly
+    # scheduling an existing to-do via task_id.
+    task_id: Mapped[int | None] = mapped_column(
+        ForeignKey("tasks.id", ondelete="CASCADE"), nullable=True, index=True
     )
     title: Mapped[str] = mapped_column(String(200), default="", nullable=False)
     start_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)

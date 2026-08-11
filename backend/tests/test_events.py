@@ -21,7 +21,9 @@ async def test_create_event_with_explicit_task(client):
     assert created.json()["task_id"] == task_id
 
 
-async def test_create_event_by_name_autocreates_task(client):
+async def test_create_event_by_name_mints_no_task(client):
+    """A plain event (kind='event') carries its own title and stands on its own —
+    it no longer mints or reuses a Task by name."""
     created = await client.post(
         "/api/events",
         json={
@@ -32,10 +34,11 @@ async def test_create_event_by_name_autocreates_task(client):
         },
     )
     assert created.status_code == 201
-    task_id = created.json()["task_id"]
-    assert task_id is not None
-    task = await client.get(f"/api/tasks/{task_id}")
-    assert task.json()["name"] == "Dentist"
+    assert created.json()["task_id"] is None
+    assert created.json()["title"] == "Dentist"
+
+    tasks = (await client.get("/api/tasks")).json()
+    assert not any(t["name"] == "Dentist" for t in tasks)
 
 
 async def test_event_requires_task_id_or_name(client):
