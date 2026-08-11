@@ -3,8 +3,8 @@ import type { DragDraft } from '../hooks/useEventDrag'
 import { addDays, formatDate, parseLocal } from '../lib/datetime'
 import {
   GRID,
-  GRID_HEIGHT_PX,
   GRID_MINUTES,
+  gridHeightPx,
   hourMarks,
   minutesToPx,
   segmentsForEvent,
@@ -61,7 +61,12 @@ export function WeekGrid({
     () => [],
   )
   for (const event of events) {
-    const segments = segmentsForEvent(parseLocal(event.start_at), parseLocal(event.end_at), weekStart)
+    const segments = segmentsForEvent(
+      parseLocal(event.start_at),
+      parseLocal(event.end_at),
+      weekStart,
+      GRID.basePxPerHour,
+    )
     for (const segment of segments) {
       segmentsByDay[segment.dayIndex].push({ event, segment })
     }
@@ -98,12 +103,12 @@ export function WeekGrid({
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="grid" style={{ gridTemplateColumns: GRID_COLUMNS }}>
-          <div className="relative" style={{ height: GRID_HEIGHT_PX }}>
+          <div className="relative" style={{ height: gridHeightPx(GRID.basePxPerHour) }}>
             {marks.map((h) => (
               <div
                 key={h}
                 className="absolute inset-x-0 -translate-y-1/2 pr-2 text-right text-[11px] text-ink-faint"
-                style={{ top: minutesToPx((h - GRID.startHour) * 60) }}
+                style={{ top: minutesToPx((h - GRID.startHour) * 60, GRID.basePxPerHour) }}
               >
                 {hourLabel(h)}
               </div>
@@ -116,7 +121,7 @@ export function WeekGrid({
               <div
                 key={dayIndex}
                 className="relative border-l border-line"
-                style={{ height: GRID_HEIGHT_PX }}
+                style={{ height: gridHeightPx(GRID.basePxPerHour) }}
               >
                 {isToday && (
                   <div
@@ -130,13 +135,13 @@ export function WeekGrid({
                     <div
                       key={h}
                       className="absolute inset-x-0 border-t border-line"
-                      style={{ top: minutesToPx((h - GRID.startHour) * 60) }}
+                      style={{ top: minutesToPx((h - GRID.startHour) * 60, GRID.basePxPerHour) }}
                     />
                   ))}
                 {isToday && showNowLine && (
                   <div
                     className="absolute inset-x-0 h-px"
-                    style={{ top: minutesToPx(nowMinutes), background: 'var(--rose-deep)' }}
+                    style={{ top: minutesToPx(nowMinutes, GRID.basePxPerHour), background: 'var(--rose-deep)' }}
                   />
                 )}
                 {segmentsByDay[dayIndex].map(({ event, segment }) => {

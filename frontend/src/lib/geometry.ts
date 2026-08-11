@@ -1,25 +1,35 @@
 import { addDays } from './datetime'
 
 export const GRID = {
-  /** The grid shows 06:00–24:00. Sleep before 06:00 is off-grid by design; the
-   *  week view is about waking hours, and the seeded rest block ends at 07:00. */
-  startHour: 6,
+  /** The grid shows the full day. Nothing is off-grid: an event at 03:00 is a real
+   *  event, and hiding it made the week lie about what was scheduled. */
+  startHour: 0,
   endHour: 24,
-  pxPerHour: 56,
+  /** Pixels per hour at zoom 1. The live value is a parameter, not this constant —
+   *  pinch zoom varies it, and anything that hardcodes it drags to the wrong time. */
+  basePxPerHour: 56,
+  /** Minimum width of a day column at zoom 1. Above zoom 1 the seven columns exceed
+   *  the container and the grid scrolls horizontally. */
+  baseColumnPx: 120,
+  minZoom: 0.5,
+  maxZoom: 3,
   slotMinutes: 15,
   /** A 5-minute event would otherwise render as a 4px sliver with unreadable text. */
   minBlockPx: 14,
 } as const
 
 export const GRID_MINUTES = (GRID.endHour - GRID.startHour) * 60
-export const GRID_HEIGHT_PX = (GRID.endHour - GRID.startHour) * GRID.pxPerHour
 
-export function minutesToPx(minutes: number): number {
-  return (minutes / 60) * GRID.pxPerHour
+export function gridHeightPx(pxPerHour: number): number {
+  return (GRID.endHour - GRID.startHour) * pxPerHour
 }
 
-export function pxToMinutes(px: number): number {
-  return (px / GRID.pxPerHour) * 60
+export function minutesToPx(minutes: number, pxPerHour: number): number {
+  return (minutes / 60) * pxPerHour
+}
+
+export function pxToMinutes(px: number, pxPerHour: number): number {
+  return (px / pxPerHour) * 60
 }
 
 export function snapMinutes(minutes: number): number {
@@ -41,12 +51,16 @@ const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDat
 /**
  * Break an event into the visible slices it occupies on a Mon-start week grid.
  *
- * Three things make this non-trivial and are why it is tested rather than inlined:
- * an event can cross midnight into another column; the grid floor at 06:00 means
- * part of an event may be invisible; and an event can lie entirely outside either
- * the week or the visible hours, in which case it contributes nothing.
+ * Two things make this non-trivial and are why it is tested rather than inlined:
+ * an event can cross midnight into another column, and an event can lie entirely
+ * outside the week, in which case it contributes nothing.
  */
-export function segmentsForEvent(start: Date, end: Date, weekStart: Date): Segment[] {
+export function segmentsForEvent(
+  start: Date,
+  end: Date,
+  weekStart: Date,
+  pxPerHour: number,
+): Segment[] {
   const out: Segment[] = []
   const weekBegin = startOfDay(weekStart)
 
@@ -67,8 +81,8 @@ export function segmentsForEvent(start: Date, end: Date, weekStart: Date): Segme
 
     out.push({
       dayIndex,
-      topPx: minutesToPx(topMinutes),
-      heightPx: Math.max(GRID.minBlockPx, minutesToPx(durationMinutes)),
+      topPx: minutesToPx(topMinutes, pxPerHour),
+      heightPx: Math.max(GRID.minBlockPx, minutesToPx(durationMinutes, pxPerHour)),
       isStart: lo.getTime() === start.getTime(),
       isEnd: hi.getTime() === end.getTime(),
     })

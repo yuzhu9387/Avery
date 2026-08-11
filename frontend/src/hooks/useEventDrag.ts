@@ -4,7 +4,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { moveEvent, updateEvent } from '../api/events'
 import type { AveryEvent } from '../api/types'
 import { resolveDrag } from '../lib/drag'
-import { pxToMinutes } from '../lib/geometry'
+import { GRID, pxToMinutes } from '../lib/geometry'
 import type { Segment } from '../lib/geometry'
 
 /** A live pointer offset for whichever event is mid-drag. Purely visual — the
@@ -83,7 +83,7 @@ export function useEventDrag() {
         el.releasePointerCapture(e.pointerId)
         setDraft(null)
 
-        const deltaMinutes = pxToMinutes(ev.clientY - originY)
+        const deltaMinutes = pxToMinutes(ev.clientY - originY, GRID.basePxPerHour)
         const deltaDays = columnWidth > 0 ? Math.round((ev.clientX - originX) / columnWidth) : 0
         const plan = resolveDrag(event, { kind: 'move', deltaMinutes, deltaDays })
         // A sub-snap delta resolves to null — that is a click, not a zero-delta move.
@@ -116,7 +116,7 @@ export function useEventDrag() {
           el.releasePointerCapture(e.pointerId)
           setDraft(null)
 
-          const deltaMinutes = pxToMinutes(ev.clientY - originY)
+          const deltaMinutes = pxToMinutes(ev.clientY - originY, GRID.basePxPerHour)
           const plan = resolveDrag(event, { kind: 'resize', edge, deltaMinutes })
           if (!plan || plan.kind !== 'patch') return
           patch.mutate({ id: event.id, body: plan.body })
