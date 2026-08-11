@@ -52,3 +52,59 @@ async def test_two_task_cards_with_one_name_get_their_own_tasks(client):
     b = await _event(client, kind="task", name="Water plants",
                      start="2026-08-04T09:00:00", end="2026-08-04T09:15:00")
     assert a["task_id"] != b["task_id"]
+
+
+async def test_complete_sets_the_timestamp_and_is_idempotent(client):
+    event = await _event(client)
+    first = await client.post(f"/api/events/{event['id']}/complete")
+    assert first.status_code == 200
+    assert first.json()["completed_at"] is not None
+
+    second = await client.post(f"/api/events/{event['id']}/complete")
+    assert second.status_code == 200
+    # Completing twice must not slide the timestamp forward — a double-click that
+    # lands twice would otherwise rewrite when the work happened.
+    assert second.json()["completed_at"] == first.json()["completed_at"]
+
+
+async def test_uncomplete_clears_the_timestamp_and_is_idempotent(client):
+    event = await _event(client)
+    await client.post(f"/api/events/{event['id']}/complete")
+    cleared = await client.post(f"/api/events/{event['id']}/uncomplete")
+    assert cleared.json()["completed_at"] is None
+    again = await client.post(f"/api/events/{event['id']}/uncomplete")
+    assert again.status_code == 200
+    assert again.json()["completed_at"] is None
+
+
+async def test_completing_a_task_card_marks_its_task_done(client):
+    event = await _event(client, kind="task", name="Renew passport")
+    await client.post(f"/api/events/{event['id']}/complete")
+    task = (await client.get(f"/api/tasks/{event['task_id']}")).json()
+    assert task["status"] == "done"
+    assert task["completed_at"] is not None
+
+    await client.post(f"/api/events/{event['id']}/uncomplete")
+    task = (await client.get(f"/api/tasks/{event['task_id']}")).json()
+    assert task["status"] == "todo"
+    assert task["completed_at"] is None
+
+
+async def test_completing_an_event_card_leaves_its_task_alone(client):
+    event = await _event(client, name="Dentist")
+    await client.post(f"/api/events/{event['id']}/complete")
+    task = (await client.get(f"/api/tasks/{event['task_id']}")).json()
+    assert task["status"] == "todo"
+
+
+async def test_uncompleting_does_not_resurrect_an_archived_task(client):
+    event = await _event(client, kind="task", name="Old chore")
+    await client.post(f"/api/events/{event['id']}/complete")
+    await client.delete(f"/api/tasks/{event['task_id']}")  # archives it
+    await client.post(f"/api/events/{event['id']}/uncomplete")
+    task = (await client.get(f"/api/tasks/{event['task_id']}")).json()
+    assert task["status"] == "archived"
+
+
+async def test_complete_on_a_missing_event_is_404(client):
+    assert (await client.post("/api/events/9999/complete")).status_code == 404

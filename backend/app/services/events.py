@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Event, Task
 from app.models.event import EventKind
+from app.models.task import TaskStatus
 from app.schemas.event import EventCreate, EventUpdate
 from app.services import tasks as task_service
 from app.services.tags import assert_tags_exist
@@ -124,3 +125,38 @@ async def delete_event(session: AsyncSession, event_id: int) -> bool:
     await session.delete(event)
     await session.commit()
     return True
+
+
+async def complete_event(session: AsyncSession, event_id: int) -> Event | None:
+    """Idempotent: an already-complete event keeps its original timestamp."""
+    event = await session.get(Event, event_id)
+    if event is None:
+        return None
+    if event.completed_at is None:
+        event.completed_at = datetime.now()
+    if event.kind == EventKind.TASK:
+        task = await session.get(Task, event.task_id)
+        # An archived task stays archived: completion must not un-archive it.
+        if task is not None and task.status != TaskStatus.ARCHIVED:
+            task.status = TaskStatus.DONE
+            task.completed_at = event.completed_at
+    await session.commit()
+    await session.refresh(event)
+    return event
+
+
+async def uncomplete_event(session: AsyncSession, event_id: int) -> Event | None:
+    event = await session.get(Event, event_id)
+    if event is None:
+        return None
+    event.completed_at = None
+    if event.kind == EventKind.TASK:
+        task = await session.get(Task, event.task_id)
+        # Guarded on DONE rather than "not archived": reopening a card must not drag
+        # an archived task back into the active list.
+        if task is not None and task.status == TaskStatus.DONE:
+            task.status = TaskStatus.TODO
+            task.completed_at = None
+    await session.commit()
+    await session.refresh(event)
+    return event

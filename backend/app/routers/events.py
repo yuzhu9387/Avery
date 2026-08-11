@@ -64,6 +64,22 @@ async def move_event(event_id: int, data: EventMove, session: AsyncSession = Dep
     return event
 
 
+@router.post("/{event_id}/complete", response_model=EventOut)
+async def complete_event(event_id: int, session: AsyncSession = Depends(get_session)):
+    event = await service.complete_event(session, event_id)
+    if event is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "event not found")
+    return event
+
+
+@router.post("/{event_id}/uncomplete", response_model=EventOut)
+async def uncomplete_event(event_id: int, session: AsyncSession = Depends(get_session)):
+    event = await service.uncomplete_event(session, event_id)
+    if event is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "event not found")
+    return event
+
+
 @router.delete("/{event_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_event(event_id: int, session: AsyncSession = Depends(get_session)):
     if not await service.delete_event(session, event_id):
