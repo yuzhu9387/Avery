@@ -1,19 +1,13 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
-import { addDays, formatDate, mondayOf } from '../lib/datetime'
+import { addDays, formatDate } from '../lib/datetime'
+import { gridDays, isWeekVisibleIn } from '../lib/miniMonth'
 
 const DAY_INITIALS = ['M', 'T', 'W', 'T', 'F', 'S', 'S']
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December',
 ]
-
-/** Six rows of seven always, so the rail never changes height as months are paged. */
-function gridDays(cursor: Date): Date[] {
-  const firstOfMonth = new Date(cursor.getFullYear(), cursor.getMonth(), 1)
-  const start = mondayOf(firstOfMonth)
-  return Array.from({ length: 42 }, (_, i) => addDays(start, i))
-}
 
 export function MiniMonth({
   selectedWeekStart,
@@ -26,6 +20,16 @@ export function MiniMonth({
   const days = gridDays(cursor)
   const todayKey = formatDate(new Date())
   const weekEnd = addDays(selectedWeekStart, 6)
+
+  // Sync cursor only when the selected week is not visible in the current grid.
+  // This preserves the user's paging position when clicking visible days, while
+  // pulling the view back into range when the main grid navigates elsewhere.
+  useEffect(() => {
+    if (!isWeekVisibleIn(days, selectedWeekStart)) {
+      // Move cursor to the month containing the selected week
+      setCursor(new Date(selectedWeekStart.getFullYear(), selectedWeekStart.getMonth(), 1))
+    }
+  }, [selectedWeekStart, days])
 
   return (
     <div>
