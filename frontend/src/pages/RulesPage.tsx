@@ -25,13 +25,13 @@ function buildStarterRule(idOf: (name: string) => number) {
     groups: [
       {
         key: 'A',
-        label: 'Work · Study · Commute',
+        label: 'Work & Study',
         ratio: 6,
         tag_ids: [idOf('Work'), idOf('Study'), idOf('Commute')],
       },
       {
         key: 'B',
-        label: 'Kids · Chores',
+        label: 'Family care',
         ratio: 3,
         tag_ids: [idOf('Kids/Family'), idOf('Chores/Prep')],
       },

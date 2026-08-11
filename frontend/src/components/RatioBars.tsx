@@ -23,7 +23,7 @@ export function RatioBars({
         return (
           <div key={g.key}>
             <div className="mb-1 flex items-baseline justify-between gap-2">
-              <span className="text-xs text-ink-muted">{compact ? g.key : g.label}</span>
+              <span className="text-xs text-ink-muted truncate min-w-0">{g.label}</span>
               <span className="flex items-center gap-2 text-xs">
                 <span className="tabular-nums">{(g.share_actual * 100).toFixed(1)}%</span>
                 <VerdictPill verdict={g.verdict} />

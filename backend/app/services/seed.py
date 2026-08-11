@@ -108,13 +108,13 @@ async def seed_all(session: AsyncSession) -> dict[str, int]:
                 groups=[
                     RuleGroup(
                         key="A",
-                        label="Work · Study · Commute",
+                        label="Work & Study",
                         ratio=6,
                         tag_ids=[by_name["Work"], by_name["Study"], by_name["Commute"]],
                     ),
                     RuleGroup(
                         key="B",
-                        label="Kids · Chores",
+                        label="Family care",
                         ratio=3,
                         tag_ids=[by_name["Kids/Family"], by_name["Chores/Prep"]],
                     ),
