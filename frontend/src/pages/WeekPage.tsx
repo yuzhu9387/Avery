@@ -10,6 +10,7 @@ import { materializeWeek } from '../api/templates'
 import type { AveryEvent, Task } from '../api/types'
 import { CategoryRail } from '../components/CategoryRail'
 import { Confetti, type Burst } from '../components/Confetti'
+import { MiniMonth } from '../components/MiniMonth'
 import { QuickCreatePopover } from '../components/QuickCreatePopover'
 import { RatioBars } from '../components/RatioBars'
 import { WeekGrid, type SlotClick } from '../components/WeekGrid'
@@ -137,7 +138,9 @@ export default function WeekPage() {
   return (
     <div className="flex h-full min-h-0">
       <aside className="w-56 shrink-0 overflow-y-auto border-r border-line bg-surface p-4">
-        <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-ink-faint">
+        <MiniMonth selectedWeekStart={monday} onPick={(day) => setMonday(mondayOf(day))} />
+
+        <h2 className="mb-3 mt-4 text-xs font-medium uppercase tracking-wide text-ink-faint">
           This week
         </h2>
         {ratios.isLoading && <p className="text-xs text-ink-faint">Checking your rule…</p>}
