@@ -16,7 +16,8 @@ import {
   snapMinutes,
   type Segment,
 } from '../lib/geometry'
-import { CARD_RIGHT_GUTTER_PX, EventCard } from './EventCard'
+import { layoutSegments, type LaidOutSegment } from '../lib/overlap'
+import { EventCard, cardColumnStyle } from './EventCard'
 
 const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 const GUTTER_PX = 56
@@ -36,6 +37,8 @@ function GridCard({
   segment,
   tag,
   title,
+  columnIndex,
+  columnCount,
   isDragging,
   dragOffset,
   onOpen,
@@ -47,6 +50,10 @@ function GridCard({
   segment: Segment
   tag: Tag | undefined
   title: string
+  /** Which of `columnCount` side-by-side slots this card sits in, when it
+   *  conflicts in time with another event. */
+  columnIndex: number
+  columnCount: number
   isDragging: boolean
   dragOffset?: { dx: number; dy: number }
   onOpen: (event: AveryEvent) => void
@@ -84,6 +91,11 @@ function GridCard({
     [],
   )
 
+  // Resize handles are hit targets laid directly over the card's own top/bottom
+  // edge, so they must track the same column slot the card itself occupies —
+  // otherwise a handle would stretch across a sibling card sharing the row.
+  const handleStyle = cardColumnStyle(columnIndex, columnCount)
+
   return (
     <div className="contents" onPointerDown={(e) => e.stopPropagation()}>
       <EventCard
@@ -91,6 +103,8 @@ function GridCard({
         segment={segment}
         tag={tag}
         title={title}
+        columnIndex={columnIndex}
+        columnCount={columnCount}
         onPointerDown={onPointerDown}
         onToggleComplete={onGlyphToggleComplete}
         isDragging={isDragging}
@@ -99,7 +113,7 @@ function GridCard({
       {onPointerDownResize && segment.isStart && (
         <div
           className="absolute z-10 h-1.5 cursor-ns-resize"
-          style={{ top: segment.topPx, left: 2, right: CARD_RIGHT_GUTTER_PX }}
+          style={{ top: segment.topPx, ...handleStyle }}
           onPointerDown={(e) => {
             e.stopPropagation()
             onPointerDownResize(e, 'start')
@@ -111,8 +125,7 @@ function GridCard({
           className="absolute z-10 h-1.5 cursor-ns-resize"
           style={{
             top: segment.topPx + segment.heightPx - 6,
-            left: 2,
-            right: CARD_RIGHT_GUTTER_PX,
+            ...handleStyle,
           }}
           onPointerDown={(e) => {
             e.stopPropagation()
@@ -203,6 +216,17 @@ export function WeekGrid({
       segmentsByDay[segment.dayIndex].push({ event, segment })
     }
   }
+
+  // Lay out each day independently: conflicts on Monday have no bearing on
+  // Tuesday's columns. `layoutSegments` returns its results in the same order
+  // it was given them, so this zips back onto `event` positionally rather than
+  // by any id.
+  const laidOutByDay: { event: AveryEvent; segment: LaidOutSegment }[][] = segmentsByDay.map(
+    (dayEntries) => {
+      const laidOut = layoutSegments(dayEntries.map((entry) => entry.segment))
+      return dayEntries.map((entry, i) => ({ event: entry.event, segment: laidOut[i] }))
+    },
+  )
 
   const heightPx = gridHeightPx(pxPerHour)
 
@@ -313,9 +337,9 @@ export function WeekGrid({
                   }}
                 />
               )}
-              {segmentsByDay[dayIndex].map(({ event, segment }) => {
+              {laidOutByDay[dayIndex].map(({ event, segment }) => {
                 const isDragging = draft?.eventId === event.id
-                let renderSegment = segment
+                let renderSegment: LaidOutSegment = segment
                 let dragOffset: { dx: number; dy: number } | undefined
 
                 if (isDragging && draft) {
@@ -338,6 +362,8 @@ export function WeekGrid({
                     segment={renderSegment}
                     tag={tagMap.get(event.tag_ids[0])}
                     title={taskMap.get(event.task_id)?.name ?? `Task #${event.task_id}`}
+                    columnIndex={segment.columnIndex}
+                    columnCount={segment.columnCount}
                     isDragging={isDragging}
                     dragOffset={dragOffset}
                     onOpen={onOpen}
