@@ -1,14 +1,22 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 
 import { errorMessage } from '../api/client'
-import { deleteEvent, getEvent } from '../api/events'
+import { deleteEvent, getEvent, updateEvent } from '../api/events'
 import { invalidateCalendar } from '../api/invalidate'
 import { qk } from '../api/keys'
 import { getTask } from '../api/tasks'
 import { useEventMutations } from '../hooks/useEventMutations'
 import { useTagMap } from '../hooks/useTags'
-import { formatTimeRange, parseLocal } from '../lib/datetime'
+import { parseLocal, resolveDayTimeRange } from '../lib/datetime'
+
+const pad = (n: number) => String(n).padStart(2, '0')
+const toTimeInput = (minutes: number) => `${pad(Math.floor(minutes / 60) % 24)}:${pad(minutes % 60)}`
+const fromTimeInput = (value: string) => {
+  const [h, m] = value.split(':').map(Number)
+  return h * 60 + m
+}
 
 export default function EventDetailPage() {
   const { eventId } = useParams()
@@ -17,6 +25,14 @@ export default function EventDetailPage() {
   const queryClient = useQueryClient()
   const tagMap = useTagMap()
   const { complete, uncomplete } = useEventMutations()
+
+  // Local drafts of the start/end minutes-since-midnight shown in the time inputs.
+  // `syncedId` tracks which event's data these drafts were last derived from, so
+  // switching to a different event (id changes) re-derives them, while the user's
+  // own in-progress edits on the current event are left alone.
+  const [syncedId, setSyncedId] = useState<number | null>(null)
+  const [startMinutes, setStartMinutes] = useState(0)
+  const [endMinutes, setEndMinutes] = useState(0)
 
   const event = useQuery({ queryKey: qk.event(id), queryFn: () => getEvent(id) })
   const task = useQuery({
@@ -33,6 +49,13 @@ export default function EventDetailPage() {
     },
   })
 
+  // `updateEvent` isn't wrapped by `useEventMutations`, so this page wires its own
+  // invalidation through the same shared helper every other write uses.
+  const saveTimes = useMutation({
+    mutationFn: (body: { start_at: string; end_at: string }) => updateEvent(id, body),
+    onSuccess: () => invalidateCalendar(queryClient),
+  })
+
   if (event.isLoading) return <p className="p-6 text-sm text-ink-faint">Loading…</p>
   if (event.isError || !event.data)
     return <p className="p-6 text-sm text-ink-faint">Couldn't load that event.</p>
@@ -40,6 +63,19 @@ export default function EventDetailPage() {
   const data = event.data
   const isDone = data.completed_at !== null
   const day = parseLocal(data.start_at)
+
+  // "Adjusting state during rendering" (a React-documented pattern): when the
+  // loaded event changes, re-derive the drafts from its data before this render
+  // commits, so there is no frame where the inputs briefly show stale minutes.
+  // A save of this same event doesn't retrigger this — `data.id` is unchanged, so
+  // the drafts (already holding what was just saved) are left as the source of truth.
+  if (data.id !== syncedId) {
+    setSyncedId(data.id)
+    const start = parseLocal(data.start_at)
+    const end = parseLocal(data.end_at)
+    setStartMinutes(start.getHours() * 60 + start.getMinutes())
+    setEndMinutes(end.getHours() * 60 + end.getMinutes())
+  }
 
   // A mutation's `error`/`isError` survives until that same mutation is re-invoked —
   // TanStack Query has no idea the other one has since run. Without resetting both
@@ -70,8 +106,34 @@ export default function EventDetailPage() {
         <dt className="text-ink-faint">Kind</dt>
         <dd className="capitalize">{data.kind}</dd>
         <dt className="text-ink-faint">When</dt>
-        <dd>
-          {day.toDateString()} · {formatTimeRange(data.start_at, data.end_at)}
+        <dd className="flex flex-wrap items-center gap-2">
+          <span>{day.toDateString()}</span>
+          <input
+            type="time"
+            step={60}
+            value={toTimeInput(startMinutes)}
+            className="rounded-[8px] px-2 py-1"
+            style={{ background: 'var(--surface)' }}
+            onChange={(e) => setStartMinutes(fromTimeInput(e.target.value))}
+          />
+          <span className="text-ink-faint">–</span>
+          <input
+            type="time"
+            step={60}
+            value={toTimeInput(endMinutes)}
+            className="rounded-[8px] px-2 py-1"
+            style={{ background: 'var(--surface)' }}
+            onChange={(e) => setEndMinutes(fromTimeInput(e.target.value))}
+          />
+          <button
+            type="button"
+            className="rounded-[8px] px-2 py-1 text-xs font-bold disabled:opacity-50"
+            style={{ background: 'var(--pale)' }}
+            disabled={saveTimes.isPending}
+            onClick={() => saveTimes.mutate(resolveDayTimeRange(day, startMinutes, endMinutes))}
+          >
+            {saveTimes.isPending ? 'Saving…' : 'Save'}
+          </button>
         </dd>
         <dt className="text-ink-faint">Categories</dt>
         <dd>{data.tag_ids.map((t) => tagMap.get(t)?.name ?? `#${t}`).join(', ') || '—'}</dd>
@@ -80,6 +142,12 @@ export default function EventDetailPage() {
         <dt className="text-ink-faint">Notes</dt>
         <dd>{data.notes || '—'}</dd>
       </dl>
+
+      {saveTimes.isError && (
+        <p className="mt-2 text-xs" style={{ color: 'var(--over)' }}>
+          {errorMessage(saveTimes.error)}
+        </p>
+      )}
 
       <div className="mt-6 flex gap-2">
         <button

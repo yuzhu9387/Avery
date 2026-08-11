@@ -53,3 +53,31 @@ export function formatTimeRange(startAt: string, endAt: string): string {
   const e = parseLocal(endAt)
   return `${pad(s.getHours())}:${pad(s.getMinutes())}–${pad(e.getHours())}:${pad(e.getMinutes())}`
 }
+
+/**
+ * Turns a calendar day plus start/end minutes-since-midnight into naive local
+ * `start_at`/`end_at` strings, ready for `updateEvent`.
+ *
+ * An end at or before the start reads as crossing midnight — the same convention
+ * `QuickCreatePopover`'s `submit` uses for a block like 23:00-01:00 — so the end is
+ * rolled onto the following day here, before the request goes out. The backend's
+ * `EventUpdate` validator rejects `end_at <= start_at` outright; sending the wrap
+ * as two same-day instants would fail that check, so the wrap must be resolved
+ * client-side rather than sent as-is.
+ *
+ * Only the calendar date of `day` is used — any time-of-day it carries (e.g. when
+ * it comes from `parseLocal(event.start_at)`) is discarded in favor of midnight.
+ */
+export function resolveDayTimeRange(
+  day: Date,
+  startMinutes: number,
+  endMinutes: number,
+): { start_at: string; end_at: string } {
+  const midnight = new Date(day.getFullYear(), day.getMonth(), day.getDate())
+  const start = new Date(midnight.getTime() + startMinutes * 60000)
+  const end =
+    endMinutes > startMinutes
+      ? new Date(midnight.getTime() + endMinutes * 60000)
+      : new Date(addDays(midnight, 1).getTime() + endMinutes * 60000)
+  return { start_at: formatLocal(start), end_at: formatLocal(end) }
+}
