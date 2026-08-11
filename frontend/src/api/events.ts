@@ -4,6 +4,8 @@ import { apiGet, apiSend } from './client'
 export const listEvents = (params?: { start?: string; end?: string; task_id?: number }) =>
   apiGet<AveryEvent[]>('/events', params)
 
+export const getEvent = (id: number) => apiGet<AveryEvent>(`/events/${id}`)
+
 export const createEvent = (body: Partial<AveryEvent>) =>
   apiSend<AveryEvent>('POST', '/events', body)
 

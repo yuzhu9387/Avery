@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client'
 import { RouterProvider, createBrowserRouter } from 'react-router-dom'
 
 import App from './App'
+import EventDetailPage from './pages/EventDetailPage'
 import MonthPage from './pages/MonthPage'
 import ReviewPage from './pages/ReviewPage'
 import RulesPage from './pages/RulesPage'
@@ -23,6 +24,7 @@ const router = createBrowserRouter([
     element: <App />,
     children: [
       { index: true, element: <WeekPage /> },
+      { path: 'events/:eventId', element: <EventDetailPage /> },
       { path: 'month', element: <MonthPage /> },
       { path: 'tasks', element: <TasksPage /> },
       { path: 'tasks/:taskId', element: <TaskDetailPage /> },

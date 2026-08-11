@@ -4,6 +4,7 @@ export const qk = {
   task: (id: number) => ['task', id] as const,
   taskStats: (id: number) => ['task', id, 'stats'] as const,
   events: (params?: Record<string, unknown>) => ['events', params ?? {}] as const,
+  event: (id: number) => ['events', 'one', id] as const,
   week: (day: string) => ['week', day] as const,
   month: (key: string) => ['month', key] as const,
   templates: ['templates'] as const,
