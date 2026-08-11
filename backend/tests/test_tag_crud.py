@@ -49,3 +49,85 @@ async def test_archive_is_still_available_on_its_own_route(client):
     archived = await client.post(f"/api/tags/{tag['id']}/archive")
     assert archived.status_code == 200
     assert archived.json()["archived"] is True
+
+
+async def test_tag_in_use_by_task_refuses_deletion(client):
+    tag = await _tag(client, name="TaskTag")
+    task = (
+        await client.post(
+            "/api/tasks",
+            json={"name": "A task", "tag_ids": [tag["id"]]},
+        )
+    ).json()
+    refused = await client.delete(f"/api/tags/{tag['id']}")
+    assert refused.status_code == 409
+    assert "task" in refused.json()["detail"]
+    assert (await client.get(f"/api/tags/{tag['id']}")).status_code == 200
+
+
+async def test_tag_in_use_by_template_block_refuses_deletion(client):
+    tag = await _tag(client, name="TemplateTag")
+    template = (
+        await client.post(
+            "/api/templates",
+            json={"name": "A template"},
+        )
+    ).json()
+    block = (
+        await client.post(
+            f"/api/templates/{template['id']}/blocks",
+            json={
+                "task_name": "Block",
+                "days": [1, 2],
+                "start_time": "09:00:00",
+                "end_time": "10:00:00",
+                "tag_ids": [tag["id"]],
+            },
+        )
+    ).json()
+    refused = await client.delete(f"/api/tags/{tag['id']}")
+    assert refused.status_code == 409
+    assert "template block" in refused.json()["detail"]
+    assert (await client.get(f"/api/tags/{tag['id']}")).status_code == 200
+
+
+async def test_tag_in_use_by_rule_exclude_tag_ids_refuses_deletion(client):
+    tag = await _tag(client, name="RuleExcludeTag")
+    rule = (
+        await client.post(
+            "/api/rules",
+            json={
+                "name": "Rule",
+                "groups": [{"key": "k", "label": "l", "ratio": 0.5}],
+                "exclude_tag_ids": [tag["id"]],
+            },
+        )
+    ).json()
+    refused = await client.delete(f"/api/tags/{tag['id']}")
+    assert refused.status_code == 409
+    assert "rule" in refused.json()["detail"]
+    assert (await client.get(f"/api/tags/{tag['id']}")).status_code == 200
+
+
+async def test_tag_in_use_by_rule_group_tag_ids_refuses_deletion(client):
+    tag = await _tag(client, name="RuleGroupTag")
+    rule = (
+        await client.post(
+            "/api/rules",
+            json={
+                "name": "Rule",
+                "groups": [{"key": "k", "label": "l", "ratio": 0.5, "tag_ids": [tag["id"]]}],
+            },
+        )
+    ).json()
+    refused = await client.delete(f"/api/tags/{tag['id']}")
+    assert refused.status_code == 409
+    assert "rule" in refused.json()["detail"]
+    assert (await client.get(f"/api/tags/{tag['id']}")).status_code == 200
+
+
+async def test_archived_unused_tag_can_be_deleted(client):
+    tag = await _tag(client, name="ArchiveMe")
+    await client.post(f"/api/tags/{tag['id']}/archive")
+    assert (await client.delete(f"/api/tags/{tag['id']}")).status_code == 204
+    assert (await client.get(f"/api/tags/{tag['id']}")).status_code == 404

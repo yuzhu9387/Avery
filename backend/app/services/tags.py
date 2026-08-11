@@ -3,7 +3,7 @@ from collections.abc import Sequence
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Event, Tag
+from app.models import Event, Rule, Tag, Task, TemplateBlock
 from app.schemas.tag import TagCreate, TagUpdate
 
 
@@ -20,11 +20,20 @@ class UnknownTagIds(Exception):
 
 
 class TagInUse(Exception):
-    """Raised when a delete is refused because events still carry the tag."""
+    """Raised when a delete is refused because something still uses the tag."""
 
-    def __init__(self, count: int) -> None:
-        self.count = count
-        super().__init__(f"{count} event(s) still use this category")
+    def __init__(
+        self,
+        event_count: int = 0,
+        task_count: int = 0,
+        template_block_count: int = 0,
+        rule_count: int = 0,
+    ) -> None:
+        self.event_count = event_count
+        self.task_count = task_count
+        self.template_block_count = template_block_count
+        self.rule_count = rule_count
+        super().__init__("tag is in use")
 
 
 async def assert_tags_exist(session: AsyncSession, tag_ids: Sequence[int]) -> None:
@@ -85,17 +94,47 @@ async def update_tag(session: AsyncSession, tag_id: int, data: TagUpdate) -> Tag
 async def delete_tag(session: AsyncSession, tag_id: int) -> bool:
     """Really deletes — but only when nothing points at it.
 
-    Events store tag ids in a JSON column, so a delete cannot cascade. Stripping the
-    id from historical events instead would silently rewrite every ratio and every
+    Tag ids are stored in JSON columns across four models, so a delete cannot cascade.
+    Stripping the id from historical data would silently rewrite every ratio and every
     stored Review report, which is why an in-use tag is refused rather than cleaned up.
     """
     tag = await session.get(Tag, tag_id)
     if tag is None:
         return False
-    rows = (await session.scalars(select(Event.tag_ids))).all()
-    count = sum(1 for tag_ids in rows if tag_id in (tag_ids or []))
-    if count:
-        raise TagInUse(count)
+
+    # Count events using this tag
+    event_rows = (await session.scalars(select(Event.tag_ids))).all()
+    event_count = sum(1 for tag_ids in event_rows if tag_id in (tag_ids or []))
+
+    # Count tasks using this tag
+    task_rows = (await session.scalars(select(Task.tag_ids))).all()
+    task_count = sum(1 for tag_ids in task_rows if tag_id in (tag_ids or []))
+
+    # Count template blocks using this tag
+    template_rows = (await session.scalars(select(TemplateBlock.tag_ids))).all()
+    template_block_count = sum(1 for tag_ids in template_rows if tag_id in (tag_ids or []))
+
+    # Count rules using this tag (in exclude_tag_ids or groups[*].tag_ids)
+    rule_rows = (await session.scalars(select(Rule))).all()
+    rule_count = 0
+    for rule in rule_rows:
+        if tag_id in (rule.exclude_tag_ids or []):
+            rule_count += 1
+        elif rule.groups:
+            for group in rule.groups:
+                if tag_id in group.get("tag_ids", []):
+                    rule_count += 1
+                    break  # Count once per rule even if multiple groups use it
+
+    # If anything uses this tag, refuse deletion
+    if event_count or task_count or template_block_count or rule_count:
+        raise TagInUse(
+            event_count=event_count,
+            task_count=task_count,
+            template_block_count=template_block_count,
+            rule_count=rule_count,
+        )
+
     await session.delete(tag)
     await session.commit()
     return True

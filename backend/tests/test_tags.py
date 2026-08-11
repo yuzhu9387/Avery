@@ -81,6 +81,7 @@ async def test_explicit_null_on_non_nullable_field_is_422_not_500(client):
 
     assert (await client.patch(f"/api/tags/{tag_id}", json={"color": None})).status_code == 422
     assert (await client.patch(f"/api/tags/{tag_id}", json={"name": None})).status_code == 422
+    assert (await client.patch(f"/api/tags/{tag_id}", json={"description": None})).status_code == 422
 
     # Tag.icon IS nullable, so explicit null there is a legitimate clear.
     cleared = await client.patch(f"/api/tags/{tag_id}", json={"icon": None})

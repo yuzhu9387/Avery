@@ -45,7 +45,16 @@ async def delete_tag(tag_id: int, session: AsyncSession = Depends(get_session)):
     try:
         deleted = await service.delete_tag(session, tag_id)
     except service.TagInUse as exc:
-        raise HTTPException(status.HTTP_409_CONFLICT, str(exc))
+        # Format a message indicating what is still using the tag
+        if exc.event_count:
+            message = f"{exc.event_count} event(s) still use this category"
+        elif exc.task_count:
+            message = "a task still uses this category"
+        elif exc.template_block_count:
+            message = "a template block still uses this category"
+        else:  # rule_count must be > 0
+            message = "a rule still uses this category"
+        raise HTTPException(status.HTTP_409_CONFLICT, message)
     if not deleted:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "tag not found")
     return Response(status_code=status.HTTP_204_NO_CONTENT)

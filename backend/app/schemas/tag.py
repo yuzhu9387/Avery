@@ -18,7 +18,7 @@ class TagUpdate(BaseModel):
     archived: bool | None = None
 
     # `icon` is omitted deliberately: Tag.icon is nullable, so explicit null clears it.
-    @field_validator("name", "color", "sort_order", "archived")
+    @field_validator("name", "color", "description", "sort_order", "archived")
     @classmethod
     def reject_explicit_null(cls, value):
         if value is None:
