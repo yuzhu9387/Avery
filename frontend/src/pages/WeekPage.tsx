@@ -47,7 +47,15 @@ export default function WeekPage() {
   const ratios = useWeekRatios(monday, week.isSuccess)
   const tagMap = useTagMap()
   const tags = useTags()
-  const { hidden, toggle } = useTagVisibility()
+  const selectableTags = useMemo(() => (tags.data ?? []).filter((t) => !t.archived), [tags.data])
+  // `undefined` (not `[]`) while the tags query hasn't settled — see the comment on
+  // useTagVisibility for why that distinction matters: a genuinely-empty tag list and
+  // a not-yet-loaded one must never be treated the same way.
+  const selectableTagIds = useMemo(
+    () => (tags.isSuccess ? selectableTags.map((t) => t.id) : undefined),
+    [tags.isSuccess, selectableTags],
+  )
+  const { hidden, toggle } = useTagVisibility(selectableTagIds)
   const { create, complete, uncomplete } = useEventMutations()
   const [slot, setSlot] = useState<SlotClick | null>(null)
 
@@ -149,7 +157,7 @@ export default function WeekPage() {
           Categories
         </h2>
         <CategoryRail
-          tags={(tags.data ?? []).filter((t) => !t.archived)}
+          tags={selectableTags}
           minutesByTag={ratios.data?.metrics.minutes_by_primary_tag ?? {}}
           totalMinutes={ratios.data?.metrics.total_minutes ?? 0}
           hidden={hidden}

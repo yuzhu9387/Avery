@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { isEventVisible, readHiddenTags, writeHiddenTags } from './tagVisibility'
+import { isEventVisible, pruneHidden, readHiddenTags, writeHiddenTags } from './tagVisibility'
 
 /** vitest runs in the node environment, so there is no real localStorage. */
 function fakeStorage(initial?: string) {
@@ -50,5 +50,30 @@ describe('isEventVisible', () => {
   it('always shows an untagged event', () => {
     // Hiding it would make it unreachable: no checkbox exists that could bring it back.
     expect(isEventVisible([], new Set([1, 2, 3]))).toBe(true)
+  })
+})
+
+describe('pruneHidden', () => {
+  it('keeps a hidden id that is still selectable', () => {
+    expect(pruneHidden(new Set([1, 2]), [1, 2, 3])).toEqual(new Set([1, 2]))
+  })
+
+  it('drops a hidden id that is no longer selectable', () => {
+    // e.g. the tag was archived after being hidden — its row, and checkbox, is gone.
+    expect(pruneHidden(new Set([1, 2]), [1])).toEqual(new Set([1]))
+  })
+
+  it('treats an empty selectable list as "not yet known" and drops nothing', () => {
+    // Otherwise a tag query that hasn't resolved yet would look identical to "zero
+    // selectable tags" and wipe a saved selection on every page load.
+    expect(pruneHidden(new Set([1, 2]), [])).toEqual(new Set([1, 2]))
+  })
+
+  it('does not mutate its inputs', () => {
+    const hidden = new Set([1, 2])
+    const selectableIds = [1]
+    pruneHidden(hidden, selectableIds)
+    expect(hidden).toEqual(new Set([1, 2]))
+    expect(selectableIds).toEqual([1])
   })
 })

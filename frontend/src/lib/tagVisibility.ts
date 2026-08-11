@@ -36,3 +36,28 @@ export function isEventVisible(tagIds: number[], hidden: Set<number>): boolean {
   if (tagIds.length === 0) return true
   return !hidden.has(tagIds[0])
 }
+
+/**
+ * Drops hidden ids that no longer have a selectable checkbox in the rail (e.g. a tag
+ * was hidden while active and has since been archived). Without this, such an id
+ * would stay hidden forever with no control able to bring it back — the same
+ * silent-blanking outcome the "every failure mode shows too much" rule above exists
+ * to prevent, even though nothing here is corrupt.
+ *
+ * `selectableIds` empty is treated as "not yet known" rather than "genuinely zero
+ * selectable tags", so it drops nothing — pruning against a list that merely hasn't
+ * loaded yet would otherwise wipe a saved selection on every page load. (The caller
+ * is expected to only invoke this once the tag list has actually settled; this is a
+ * second, defensive line against that same mistake.)
+ *
+ * Does not mutate either input.
+ */
+export function pruneHidden(hidden: Set<number>, selectableIds: number[]): Set<number> {
+  if (selectableIds.length === 0) return new Set(hidden)
+  const selectable = new Set(selectableIds)
+  const next = new Set<number>()
+  for (const id of hidden) {
+    if (selectable.has(id)) next.add(id)
+  }
+  return next
+}
