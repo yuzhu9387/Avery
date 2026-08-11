@@ -6,6 +6,18 @@ export interface LaidOutSegment extends Segment {
   /** The width of this segment's cluster, in columns. Segments in unrelated
    *  clusters (no shared time) never affect each other's count. */
   columnCount: number
+  /**
+   * How many consecutive columns, starting at `columnIndex`, this segment
+   * actually draws across. Always at least 1, and at most `columnCount -
+   * columnIndex`. A card only reaches into a column to its right if nothing
+   * placed there genuinely overlaps it in time — a cluster-mate merely sharing
+   * the cluster is not enough, since that neighbour might occupy the same
+   * column at a completely different hour. This is what stops a single
+   * all-day event from squeezing every other card on the day down to
+   * `1/columnCount` width regardless of whether they actually conflict with
+   * each other.
+   */
+  columnSpan: number
 }
 
 /**
@@ -32,6 +44,18 @@ export interface LaidOutSegment extends Segment {
  * was building closes and every member is stamped with the max concurrency it
  * reached; a fresh cluster starts with the next segment.
  *
+ * `columnCount` alone is not enough to size a card: a single long background
+ * event (say, a 7-hour work block) can pull an entire day's worth of otherwise
+ * unrelated short events into one cluster, and every member would render at
+ * `1/columnCount` even though most of them never conflict with each other —
+ * legible cards become unreadable slivers. So after column *assignment* is
+ * settled for a cluster, a second pass computes `columnSpan`: each segment
+ * walks rightward from its own column through its cluster-mates' columns,
+ * stopping at (not including) the first column holding a segment that
+ * genuinely overlaps it in time. A column can be shared with the cluster
+ * without blocking anything, provided the segment sitting there never
+ * actually coincides with this one.
+ *
  * Does not mutate the input.
  */
 export function layoutSegments(segments: Segment[]): LaidOutSegment[] {
@@ -47,16 +71,46 @@ export function layoutSegments(segments: Segment[]): LaidOutSegment[] {
 
   const columnIndexByOriginal = new Map<number, number>()
   const columnCountByOriginal = new Map<number, number>()
+  const columnSpanByOriginal = new Map<number, number>()
   const clusterMembers: number[] = []
   // Active segments, each recorded as [endPx, columnIndex]. Cleared out (by end
   // point) as the sweep passes them.
   let active: { endPx: number; columnIndex: number }[] = []
   let clusterMaxConcurrency = 0
 
+  // Two segments genuinely overlap (as opposed to merely sharing a cluster)
+  // when their pixel ranges intersect with positive measure — touching at a
+  // single point is back-to-back, not overlap, matching the sweep above.
+  const timeOverlaps = (a: Segment, b: Segment) =>
+    a.topPx < b.topPx + b.heightPx && b.topPx < a.topPx + a.heightPx
+
   const flushCluster = () => {
+    const clusterCount = clusterMaxConcurrency
     for (const originalIndex of clusterMembers) {
-      columnCountByOriginal.set(originalIndex, clusterMaxConcurrency)
+      columnCountByOriginal.set(originalIndex, clusterCount)
     }
+
+    // Bucket this cluster's members by the column they landed in, so the
+    // expansion pass below can ask "does anything in column N overlap me?"
+    // without rescanning the whole cluster for every segment.
+    const columns: Segment[][] = Array.from({ length: clusterCount }, () => [])
+    for (const originalIndex of clusterMembers) {
+      const ci = columnIndexByOriginal.get(originalIndex)!
+      columns[ci].push(segments[originalIndex])
+    }
+
+    for (const originalIndex of clusterMembers) {
+      const ci = columnIndexByOriginal.get(originalIndex)!
+      const mySegment = segments[originalIndex]
+      let span = 1
+      for (let col = ci + 1; col < clusterCount; col += 1) {
+        const blocked = columns[col].some((other) => timeOverlaps(mySegment, other))
+        if (blocked) break
+        span += 1
+      }
+      columnSpanByOriginal.set(originalIndex, span)
+    }
+
     clusterMembers.length = 0
     clusterMaxConcurrency = 0
   }
@@ -87,5 +141,6 @@ export function layoutSegments(segments: Segment[]): LaidOutSegment[] {
     ...segment,
     columnIndex: columnIndexByOriginal.get(originalIndex)!,
     columnCount: columnCountByOriginal.get(originalIndex)!,
+    columnSpan: columnSpanByOriginal.get(originalIndex)!,
   }))
 }

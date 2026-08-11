@@ -15,25 +15,37 @@ const CARD_LEFT_PX = 2
 const CARD_GAP_PX = 3
 
 /**
- * Horizontal placement for a card occupying one of `columnCount` equal slots
- * within the span the card would otherwise have entirely to itself
- * (`CARD_LEFT_PX` in from the left, `CARD_RIGHT_GUTTER_PX` free on the right).
+ * Horizontal placement for a card occupying `columnSpan` of `columnCount` equal
+ * slots within the span the card would otherwise have entirely to itself
+ * (`CARD_LEFT_PX` in from the left, `CARD_RIGHT_GUTTER_PX` free on the right),
+ * starting at `columnIndex`.
  *
- * At `columnCount` 1 this returns the exact `{ left, right }` pair the card has
- * always used — same keys, same values — so a non-conflicting card (the
- * overwhelming majority) renders byte-identical to before this feature existed.
- * Only when a card actually shares its slot does it switch to a `{ left, width }`
- * pair expressed via `calc()`, since the slot width depends on the day column's
- * runtime pixel width, not just fixed pixel insets.
+ * `columnSpan` lets a card that only conflicts with *some* of its cluster reclaim
+ * the columns nothing else needs at its own time — see `layoutSegments` in
+ * `lib/overlap.ts`, which computes it. A card genuinely boxed in on all sides
+ * (three-way overlap, say) gets `columnSpan` 1 and renders at a plain `1/columnCount`
+ * width; a card whose only conflict is a single long background event can expand
+ * across every other column, since nothing else is actually there at its time.
  *
- * The right-hand gutter stays untouched either way: the last column's slot still
- * ends exactly `CARD_RIGHT_GUTTER_PX` from the column's edge, because the fixed
- * pixel budget (left inset + right gutter + internal gaps) is divided out of the
- * available width before the columns are split, not added on top of it.
+ * At `columnCount` 1 (and therefore `columnSpan` 1) this returns the exact
+ * `{ left, right }` pair the card has always used — same keys, same values — so a
+ * non-conflicting card (the overwhelming majority) renders byte-identical to
+ * before this feature existed. Only when a card actually shares its cluster does
+ * it switch to a `{ left, width }` pair expressed via `calc()`, since both the
+ * slot width and the span depend on the day column's runtime pixel width, not
+ * just fixed pixel insets.
+ *
+ * The right-hand gutter stays untouched regardless of span: even a card
+ * expanding all the way to the cluster's last column still ends exactly
+ * `CARD_RIGHT_GUTTER_PX` from the column's edge, because the fixed pixel budget
+ * (left inset + right gutter + internal gaps) is divided out of the available
+ * width before the columns are split, not added on top of it — the algebra holds
+ * for any `columnSpan` up to `columnCount - columnIndex`, not just 1.
  */
 export function cardColumnStyle(
   columnIndex: number,
   columnCount: number,
+  columnSpan: number,
 ): { left: number | string; right?: number; width?: string } {
   if (columnCount <= 1) {
     return { left: CARD_LEFT_PX, right: CARD_RIGHT_GUTTER_PX }
@@ -42,10 +54,15 @@ export function cardColumnStyle(
   // Total fixed pixels consumed by insets and the gaps between columns; the rest
   // of the day column's width is split evenly across `columnCount` slots.
   const fixedPx = CARD_LEFT_PX + CARD_RIGHT_GUTTER_PX + (columnCount - 1) * CARD_GAP_PX
-  const widthPercent = 100 / columnCount
-  const widthPxOffset = fixedPx / columnCount
+  const slotWidthPxOffset = fixedPx / columnCount
   const leftPercent = (columnIndex / columnCount) * 100
-  const leftPxOffset = CARD_LEFT_PX + columnIndex * (CARD_GAP_PX - widthPxOffset)
+  const leftPxOffset = CARD_LEFT_PX + columnIndex * (CARD_GAP_PX - slotWidthPxOffset)
+
+  // A card spanning multiple slots is one continuous box: it keeps the gap
+  // before its first slot and after its last, but not the internal gaps
+  // between the slots it itself occupies.
+  const widthPercent = (100 / columnCount) * columnSpan
+  const widthPxOffset = slotWidthPxOffset * columnSpan - (columnSpan - 1) * CARD_GAP_PX
 
   return {
     left: `calc(${leftPercent}% + ${leftPxOffset}px)`,
@@ -60,6 +77,7 @@ export function EventCard({
   title,
   columnIndex = 0,
   columnCount = 1,
+  columnSpan = 1,
   onPointerDown,
   onToggleComplete,
   isDragging,
@@ -73,6 +91,10 @@ export function EventCard({
    *  conflict in time with another. Defaults to the un-split single column. */
   columnIndex?: number
   columnCount?: number
+  /** How many of `columnCount` slots, starting at `columnIndex`, this card
+   *  actually draws across — see `cardColumnStyle`. Defaults to the un-split
+   *  single column. */
+  columnSpan?: number
   onPointerDown?: (e: React.PointerEvent) => void
   /** Toggles completion from the glyph directly, bypassing the card's double-click
    *  arbitration. `point` is the viewport coordinate the confetti burst should
@@ -93,7 +115,7 @@ export function EventCard({
   }
 
   const shape = chipShape({ color, isTask, isDone })
-  const columnStyle = cardColumnStyle(columnIndex, columnCount)
+  const columnStyle = cardColumnStyle(columnIndex, columnCount, columnSpan)
 
   return (
     <div

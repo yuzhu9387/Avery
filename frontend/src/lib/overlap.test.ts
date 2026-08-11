@@ -91,4 +91,92 @@ describe('layoutSegments', () => {
   it('returns an empty array for an empty day', () => {
     expect(layoutSegments([])).toEqual([])
   })
+
+  describe('columnSpan (expansion into columns that are free at this segment\'s own time)', () => {
+    it('does not expand any of three genuinely concurrent events', () => {
+      const result = layoutSegments([seg(0, 60), seg(0, 60), seg(0, 60)])
+      expect(result.map((r) => r.columnSpan)).toEqual([1, 1, 1])
+    })
+
+    it('expands a back-to-back pair past decoy columns that ended before they began', () => {
+      // `long` spans the whole cluster and keeps it open throughout, so nothing
+      // here splits into a separate cluster. `a`, `b`, `c` are all mutually
+      // concurrent for a short early window (10-20), forcing 4 columns total:
+      // long + the three of them. All three end well before `d` and `e` begin.
+      // `d` and `e` are back-to-back with each other (200-300, 300-400) and
+      // only ever overlap `long` — by the time they start, a/b/c are long gone,
+      // so every column but `long`'s own should be free for them to fill.
+      const long = seg(0, 1000)
+      const a = seg(10, 10) // 10-20
+      const b = seg(10, 10) // 10-20
+      const c = seg(10, 10) // 10-20
+      const d = seg(200, 100) // 200-300
+      const e = seg(300, 100) // 300-400, back-to-back with d
+      const result = layoutSegments([long, a, b, c, d, e])
+      const [rLong, rA, rB, rC, rD, rE] = result
+
+      expect(result.every((r) => r.columnCount === 4)).toBe(true)
+      expect([rLong.columnIndex, rA.columnIndex, rB.columnIndex, rC.columnIndex]).toEqual([
+        0, 1, 2, 3,
+      ])
+      expect(rD.columnIndex).toBe(1) // reuses a's freed column
+      expect(rE.columnIndex).toBe(1) // reuses it again once d ends
+
+      // long is genuinely overlapped by a for the entirety of a's life, so it
+      // can't reach past column 1 even though a itself is short-lived.
+      expect(rLong.columnSpan).toBe(1)
+      // a, b, c genuinely overlap their immediate right-hand neighbour (each
+      // other), so none of them expands.
+      expect(rA.columnSpan).toBe(1)
+      expect(rB.columnSpan).toBe(1)
+      expect(rC.columnSpan).toBe(1)
+      // d and e overlap nothing in columns 2 or 3 at their own time (a/b/c
+      // ended at 20, long since past) — full remaining span, to the cluster's
+      // last column.
+      expect(rD.columnSpan).toBe(3)
+      expect(rE.columnSpan).toBe(3)
+    })
+
+    it('expands into a right-hand column whose occupant only exists outside its own time range', () => {
+      // x is long-lived and keeps the cluster open. y and v are concurrent
+      // with x (and each other) early on (0-60 / 0-100), forcing a 3rd column.
+      // z starts at 100 — exactly when v ends, so v is not overlapping it —
+      // and only overlaps x. z reuses y's freed column (0); v's column (1) is
+      // free for the whole of z's time, so z should reach it, but x's column
+      // (2) genuinely overlaps z the entire time, so z must stop there.
+      const x = seg(0, 200) // 0-200
+      const y = seg(0, 60) // 0-60
+      const v = seg(0, 100) // 0-100, ends exactly as z begins: not overlapping
+      const z = seg(100, 50) // 100-150
+      const result = layoutSegments([x, y, v, z])
+      const [rX, rY, rV, rZ] = result
+
+      expect(result.every((r) => r.columnCount === 3)).toBe(true)
+      expect(rY.columnIndex).toBe(0)
+      expect(rV.columnIndex).toBe(1)
+      expect(rX.columnIndex).toBe(2)
+      expect(rZ.columnIndex).toBe(0) // reuses y's freed column
+
+      expect(rZ.columnSpan).toBe(2) // reaches v's column; x's blocks it there
+      expect(rY.columnSpan).toBe(1) // v is right there overlapping the whole time
+      expect(rV.columnSpan).toBe(1) // x is right there overlapping the whole time
+      expect(rX.columnSpan).toBe(1) // already the cluster's last column
+    })
+
+    it('does not expand when the right-hand neighbour overlaps by even one pixel', () => {
+      // Identical to the previous case except v now ends one pixel into z's
+      // time (0-101 instead of 0-100) — a genuine, if tiny, overlap. Column
+      // assignment is unaffected (z still reuses column 0), but z can no
+      // longer claim column 1.
+      const x = seg(0, 200) // 0-200
+      const y = seg(0, 60) // 0-60
+      const v = seg(0, 101) // 0-101, overlaps z's 100-150 by 1px
+      const z = seg(100, 50) // 100-150
+      const result = layoutSegments([x, y, v, z])
+      const [, , , rZ] = result
+
+      expect(rZ.columnIndex).toBe(0) // assignment is unchanged by the 1px shift
+      expect(rZ.columnSpan).toBe(1) // but it can no longer expand into v's column
+    })
+  })
 })

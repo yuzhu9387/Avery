@@ -39,6 +39,7 @@ function GridCard({
   title,
   columnIndex,
   columnCount,
+  columnSpan,
   isDragging,
   dragOffset,
   onOpen,
@@ -54,6 +55,9 @@ function GridCard({
    *  conflicts in time with another event. */
   columnIndex: number
   columnCount: number
+  /** How many of `columnCount` slots, starting at `columnIndex`, this card
+   *  actually draws across — see `layoutSegments` in `lib/overlap.ts`. */
+  columnSpan: number
   isDragging: boolean
   dragOffset?: { dx: number; dy: number }
   onOpen: (event: AveryEvent) => void
@@ -94,7 +98,7 @@ function GridCard({
   // Resize handles are hit targets laid directly over the card's own top/bottom
   // edge, so they must track the same column slot the card itself occupies —
   // otherwise a handle would stretch across a sibling card sharing the row.
-  const handleStyle = cardColumnStyle(columnIndex, columnCount)
+  const handleStyle = cardColumnStyle(columnIndex, columnCount, columnSpan)
 
   return (
     <div className="contents" onPointerDown={(e) => e.stopPropagation()}>
@@ -105,6 +109,7 @@ function GridCard({
         title={title}
         columnIndex={columnIndex}
         columnCount={columnCount}
+        columnSpan={columnSpan}
         onPointerDown={onPointerDown}
         onToggleComplete={onGlyphToggleComplete}
         isDragging={isDragging}
@@ -364,6 +369,7 @@ export function WeekGrid({
                     title={taskMap.get(event.task_id)?.name ?? `Task #${event.task_id}`}
                     columnIndex={segment.columnIndex}
                     columnCount={segment.columnCount}
+                    columnSpan={segment.columnSpan}
                     isDragging={isDragging}
                     dragOffset={dragOffset}
                     onOpen={onOpen}
