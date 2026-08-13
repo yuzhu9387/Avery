@@ -249,9 +249,17 @@ async def test_chinese_substring_search_matches_mid_string(session):
     once a search endpoint exists."""
     from sqlalchemy import select
 
-    from app.models import Task
+    from app.models import Task, User
 
-    session.add(Task(name="陪娃去看牙医", tag_ids=[], notes="记得带上医保卡"))
+    # user_id is NOT NULL now, and the FK is enforced in tests — a real owner
+    # row is required, not just any int.
+    user = User(email="search-owner@example.com", name="Owner", password_hash=None)
+    session.add(user)
+    await session.flush()
+
+    session.add(
+        Task(user_id=user.id, name="陪娃去看牙医", tag_ids=[], notes="记得带上医保卡")
+    )
     await session.commit()
 
     for pattern in ("%牙医%", "%陪娃%", "%医保卡%"):

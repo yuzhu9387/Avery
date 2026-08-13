@@ -22,6 +22,9 @@ class Event(Base):
     __tablename__ = "events"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     # NULL for a plain event (kind='event') that was created by name or by a
     # routine block: those no longer mint or reuse a Task. Still set for a
     # kind='task' card (1:1 with its Task) and for an event explicitly

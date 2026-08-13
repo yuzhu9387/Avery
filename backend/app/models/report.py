@@ -13,6 +13,9 @@ class Report(Base):
     __tablename__ = "reports"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     period_start: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     period_end: Mapped[date] = mapped_column(Date, nullable=False)
     rule_id: Mapped[int] = mapped_column(ForeignKey("rules.id"), nullable=False)

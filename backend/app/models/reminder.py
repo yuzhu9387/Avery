@@ -17,6 +17,9 @@ class Reminder(Base):
     __tablename__ = "reminders"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     task_id: Mapped[int] = mapped_column(
         ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False, index=True
     )

@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from sqlalchemy import JSON, Date, DateTime, Float, Integer, String, Text
+from sqlalchemy import JSON, Date, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -10,6 +10,9 @@ class Rule(Base):
     __tablename__ = "rules"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     groups: Mapped[list[dict]] = mapped_column(JSON, nullable=False)
     tolerance: Mapped[float] = mapped_column(Float, default=0.2, nullable=False)

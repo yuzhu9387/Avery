@@ -19,6 +19,10 @@ class Routine(Base):
     __tablename__ = "routines"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # Blocks are scoped transitively through their routine — no user_id there.
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     note: Mapped[str] = mapped_column(Text, default="", nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
