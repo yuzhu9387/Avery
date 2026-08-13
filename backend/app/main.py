@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import app.models  # noqa: F401
 
 from app.database import Base, engine
+from app.routers import agent_tokens as agent_tokens_router
 from app.routers import analytics as analytics_router
 from app.routers import calendar as calendar_router
 from app.routers import events as events_router
@@ -38,6 +39,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(agent_tokens_router.router)
 app.include_router(seed_router.router)
 app.include_router(tags_router.router)
 app.include_router(tasks_router.router)
