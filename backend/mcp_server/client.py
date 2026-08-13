@@ -55,8 +55,15 @@ class AveryForbidden(AveryError):
 
 
 class AveryNotFound(AveryError):
-    def __init__(self, detail: str):
-        super().__init__(detail)
+    def __init__(self, detail: str, base_url: str):
+        # detail is Avery's own "task 9 not found" -- genuine, but a 404 is
+        # also exactly what a *reachable but wrong* service returns, so name
+        # that possibility rather than let it read as "the task is missing".
+        super().__init__(
+            f"{detail} (If that's surprising, confirm AVERY_BASE_URL={base_url} "
+            f"is actually Avery -- on this machine port 8000 is shadowed by an "
+            f"unrelated service; Avery runs on 8001.)"
+        )
 
 
 class AveryValidationError(AveryError):
@@ -95,7 +102,11 @@ class AveryClient:
         token: str | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
-        self.base_url = base_url or os.environ.get("AVERY_BASE_URL", "http://127.0.0.1:8000")
+        # 8001, not 8000: on the dev machine a Docker container listens on
+        # *:8000 over the IPv6 wildcard and shadows anything started there --
+        # see Avery/backend/README.md. A wrong-default here doesn't fail
+        # loudly, it 404s against a stranger and reads as "Avery is broken".
+        self.base_url = base_url or os.environ.get("AVERY_BASE_URL", "http://127.0.0.1:8001")
         resolved_token = token if token is not None else os.environ.get("AVERY_AGENT_TOKEN")
         if not resolved_token:
             raise AveryConfigError(
@@ -125,7 +136,7 @@ class AveryClient:
         if response.status_code == 403:
             raise AveryForbidden(_detail(response))
         if response.status_code == 404:
-            raise AveryNotFound(_detail(response))
+            raise AveryNotFound(_detail(response), self.base_url)
         if response.status_code == 422:
             raise AveryValidationError(_detail(response))
         if response.status_code >= 400:
