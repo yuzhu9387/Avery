@@ -17,6 +17,13 @@ class Settings(BaseSettings):
     enable_scheduler: bool = True
     week_roll_hour: int = 20  # Sunday 20:00 local
 
+    # Shared secret for the HTTP job endpoints (app/routers/jobs.py), which
+    # Cloud Scheduler calls on Cloud Run instead of relying on an in-process
+    # APScheduler cron (see that router's module docstring). Empty means "not
+    # configured" and the endpoints must refuse to run — see verify_jobs_token
+    # in app/deps.py.
+    jobs_token: str = ""
+
     # OAuth (empty = provider not configured; /oauth/{provider}/start answers 501).
     google_client_id: str = ""
     google_client_secret: str = ""

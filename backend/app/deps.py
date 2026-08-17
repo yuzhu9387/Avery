@@ -1,8 +1,11 @@
 """Request-scoped dependencies shared by every router."""
 
+import hmac
+
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.database import get_session
 from app.models import AgentToken, User
 from app.services import agent_auth
@@ -101,3 +104,40 @@ async def get_agent_scope(
     if agent_token is None:
         return None
     return agent_token.workspace
+
+
+_JOBS_TOKEN_HEADER = "x-jobs-token"
+
+
+async def verify_jobs_token(request: Request) -> None:
+    """Shared-secret auth for the Cloud-Scheduler-facing job endpoints
+    (app/routers/jobs.py). There is no user in a cron request, so these do
+    not — and must not — hang off get_current_user.
+
+    An unset `JOBS_TOKEN` must refuse every call with 503 rather than let the
+    endpoint run unauthenticated. "no token configured" silently becoming "no
+    auth required" is exactly how a job endpoint that mutates every user's
+    data turns into a public one — fail closed, not open.
+
+    The comparison is constant-time (hmac.compare_digest) because, unlike
+    agent_auth.resolve, the attacker here *can* choose which value gets
+    compared: this is a single shared secret checked against caller-supplied
+    input on every request, not a hash-and-lookup keyed by an unguessable
+    token. A naive `==` would leak how many leading bytes matched through
+    response timing.
+
+    A stronger alternative when the service does not need
+    `--allow-unauthenticated`: make it private and have Cloud Scheduler
+    authenticate with an OIDC identity token instead (Cloud Scheduler's HTTP
+    target supports an OIDC token pointed at the Cloud Run service's own
+    identity, verified by the platform before the request ever reaches this
+    code). This shared secret is what works when the service must stay
+    publicly reachable.
+    """
+    if not settings.jobs_token:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, "jobs endpoint not configured"
+        )
+    supplied = request.headers.get(_JOBS_TOKEN_HEADER, "")
+    if not hmac.compare_digest(supplied, settings.jobs_token):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "not authenticated")

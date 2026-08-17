@@ -14,6 +14,7 @@ from app.routers import analytics as analytics_router
 from app.routers import auth as auth_router
 from app.routers import calendar as calendar_router
 from app.routers import events as events_router
+from app.routers import jobs as jobs_router
 from app.routers import reminders as reminders_router
 from app.routers import reports as reports_router
 from app.routers import rules as rules_router
@@ -51,6 +52,7 @@ app.include_router(tags_router.router)
 app.include_router(tasks_router.router)
 app.include_router(reminders_router.router)
 app.include_router(events_router.router)
+app.include_router(jobs_router.router)
 app.include_router(rules_router.router)
 app.include_router(reports_router.router)
 app.include_router(analytics_router.router)
