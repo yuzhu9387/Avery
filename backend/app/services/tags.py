@@ -3,7 +3,7 @@ from collections.abc import Sequence
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Event, Rule, Tag, Task, RoutineBlock
+from app.models import Event, Rule, Tag, Task, Routine, RoutineBlock
 from app.schemas.tag import TagCreate, TagUpdate
 
 
@@ -36,53 +36,72 @@ class TagInUse(Exception):
         super().__init__("tag is in use")
 
 
-async def assert_tags_exist(session: AsyncSession, tag_ids: Sequence[int]) -> None:
-    """Archived tags count as existing — they are still real rows events point at."""
+async def assert_tags_exist(
+    session: AsyncSession, tag_ids: Sequence[int], user_id: int
+) -> None:
+    """Archived tags count as existing — they are still real rows events point at.
+
+    Scoped per user: another user's tag id must be indistinguishable from a tag
+    that does not exist at all.
+    """
     wanted = {int(t) for t in tag_ids}
     if not wanted:
         return
     found = set(
-        (await session.scalars(select(Tag.id).where(Tag.id.in_(wanted)))).all()
+        (
+            await session.scalars(
+                select(Tag.id).where(Tag.id.in_(wanted), Tag.user_id == user_id)
+            )
+        ).all()
     )
     missing = sorted(wanted - found)
     if missing:
         raise UnknownTagIds(missing)
 
 
-async def list_tags(session: AsyncSession, include_archived: bool = False) -> list[Tag]:
-    stmt = select(Tag).order_by(Tag.sort_order, Tag.id)
+async def list_tags(
+    session: AsyncSession, user_id: int, include_archived: bool = False
+) -> list[Tag]:
+    stmt = (
+        select(Tag).where(Tag.user_id == user_id).order_by(Tag.sort_order, Tag.id)
+    )
     if not include_archived:
         stmt = stmt.where(Tag.archived.is_(False))
     return list((await session.scalars(stmt)).all())
 
 
-async def get_tag(session: AsyncSession, tag_id: int) -> Tag | None:
-    return await session.get(Tag, tag_id)
+async def get_tag(session: AsyncSession, tag_id: int, user_id: int) -> Tag | None:
+    stmt = select(Tag).where(Tag.id == tag_id, Tag.user_id == user_id)
+    return (await session.scalars(stmt)).first()
 
 
-async def _name_taken(session: AsyncSession, name: str, exclude_id: int | None) -> bool:
-    stmt = select(Tag.id).where(Tag.name == name)
+async def _name_taken(
+    session: AsyncSession, name: str, user_id: int, exclude_id: int | None
+) -> bool:
+    stmt = select(Tag.id).where(Tag.name == name, Tag.user_id == user_id)
     if exclude_id is not None:
         stmt = stmt.where(Tag.id != exclude_id)
     return (await session.scalars(stmt)).first() is not None
 
 
-async def create_tag(session: AsyncSession, data: TagCreate) -> Tag:
-    if await _name_taken(session, data.name, None):
+async def create_tag(session: AsyncSession, data: TagCreate, user_id: int) -> Tag:
+    if await _name_taken(session, data.name, user_id, None):
         raise DuplicateTagName(data.name)
-    tag = Tag(**data.model_dump())
+    tag = Tag(user_id=user_id, **data.model_dump())
     session.add(tag)
     await session.commit()
     await session.refresh(tag)
     return tag
 
 
-async def update_tag(session: AsyncSession, tag_id: int, data: TagUpdate) -> Tag | None:
-    tag = await session.get(Tag, tag_id)
+async def update_tag(
+    session: AsyncSession, tag_id: int, data: TagUpdate, user_id: int
+) -> Tag | None:
+    tag = await get_tag(session, tag_id, user_id)
     if tag is None:
         return None
     fields = data.model_dump(exclude_unset=True)
-    if "name" in fields and await _name_taken(session, fields["name"], tag_id):
+    if "name" in fields and await _name_taken(session, fields["name"], user_id, tag_id):
         raise DuplicateTagName(fields["name"])
     for key, value in fields.items():
         setattr(tag, key, value)
@@ -91,31 +110,43 @@ async def update_tag(session: AsyncSession, tag_id: int, data: TagUpdate) -> Tag
     return tag
 
 
-async def delete_tag(session: AsyncSession, tag_id: int) -> bool:
+async def delete_tag(session: AsyncSession, tag_id: int, user_id: int) -> bool:
     """Really deletes — but only when nothing points at it.
 
     Tag ids are stored in JSON columns across four models, so a delete cannot cascade.
     Stripping the id from historical data would silently rewrite every ratio and every
     stored Review report, which is why an in-use tag is refused rather than cleaned up.
     """
-    tag = await session.get(Tag, tag_id)
+    tag = await get_tag(session, tag_id, user_id)
     if tag is None:
         return False
 
-    # Count events using this tag
-    event_rows = (await session.scalars(select(Event.tag_ids))).all()
+    # Count events using this tag (this user's rows only — tag ids are per-user)
+    event_rows = (
+        await session.scalars(select(Event.tag_ids).where(Event.user_id == user_id))
+    ).all()
     event_count = sum(1 for tag_ids in event_rows if tag_id in (tag_ids or []))
 
     # Count tasks using this tag
-    task_rows = (await session.scalars(select(Task.tag_ids))).all()
+    task_rows = (
+        await session.scalars(select(Task.tag_ids).where(Task.user_id == user_id))
+    ).all()
     task_count = sum(1 for tag_ids in task_rows if tag_id in (tag_ids or []))
 
-    # Count routine blocks using this tag
-    routine_rows = (await session.scalars(select(RoutineBlock.tag_ids))).all()
+    # Count routine blocks using this tag (blocks scope through their routine)
+    routine_rows = (
+        await session.scalars(
+            select(RoutineBlock.tag_ids)
+            .join(Routine, RoutineBlock.routine_id == Routine.id)
+            .where(Routine.user_id == user_id)
+        )
+    ).all()
     routine_block_count = sum(1 for tag_ids in routine_rows if tag_id in (tag_ids or []))
 
     # Count rules using this tag (in exclude_tag_ids or groups[*].tag_ids)
-    rule_rows = (await session.scalars(select(Rule))).all()
+    rule_rows = (
+        await session.scalars(select(Rule).where(Rule.user_id == user_id))
+    ).all()
     rule_count = 0
     for rule in rule_rows:
         if tag_id in (rule.exclude_tag_ids or []):
@@ -140,14 +171,14 @@ async def delete_tag(session: AsyncSession, tag_id: int) -> bool:
     return True
 
 
-async def archive_tag(session: AsyncSession, tag_id: int) -> Tag | None:
+async def archive_tag(session: AsyncSession, tag_id: int, user_id: int) -> Tag | None:
     """Tags are never hard-deleted — events freeze tag ids onto themselves, so
     dropping the row would leave dangling ids in historical analytics. Archiving
     hides the tag from pickers while keeping every past reference resolvable.
 
     Idempotent: archiving an already-archived tag succeeds and changes nothing.
     """
-    tag = await session.get(Tag, tag_id)
+    tag = await get_tag(session, tag_id, user_id)
     if tag is None:
         return None
     tag.archived = True

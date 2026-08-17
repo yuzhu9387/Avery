@@ -13,6 +13,17 @@ class Settings(BaseSettings):
     enable_scheduler: bool = True
     week_roll_hour: int = 20  # Sunday 20:00 local
 
+    # OAuth (empty = provider not configured; /oauth/{provider}/start answers 501).
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    lark_app_id: str = ""
+    lark_app_secret: str = ""
+    # Where the browser lands after an OAuth round-trip — the frontend origin.
+    # The provider-facing redirect_uri is derived from it too
+    # ({base}/api/auth/oauth/{provider}/callback), which works because the
+    # frontend dev server proxies /api to this backend.
+    oauth_redirect_base: str = "http://localhost:5173"
+
     def resolved_database_url(self) -> str:
         """Rewrite a relative sqlite path to an absolute one under the project dir."""
         prefix = "sqlite+aiosqlite:///"

@@ -39,19 +39,25 @@ async def evaluate_period(
     session: AsyncSession,
     period_start: datetime,
     period_end: datetime,
+    user_id: int,
     rule_id: int | None = None,
 ) -> tuple[Evaluation, Rule]:
     if period_end <= period_start:
         raise InvalidPeriod()
     if rule_id is None:
-        rule = await rule_service.get_active_rule(session)
+        rule = await rule_service.get_active_rule(session, user_id)
         if rule is None:
             raise NoActiveRule()
     else:
-        rule = await rule_service.get_rule(session, rule_id)
+        rule = await rule_service.get_rule(session, rule_id, user_id)
         if rule is None:
             raise RuleNotFound(rule_id)
 
-    rows = await event_service.list_events(session, start=period_start, end=period_end)
-    slices = [to_slice(e) for e in rows]
+    rows = await event_service.list_events(
+        session, user_id, start=period_start, end=period_end
+    )
+    # All-day items are day markers (holidays, "no school"), not allocated time —
+    # counting one would pour 1440 untagged minutes into the denominator and bend
+    # every share in the rule readout.
+    slices = [to_slice(e) for e in rows if not e.all_day]
     return evaluate(slices, rule_service.to_spec(rule), period_start, period_end), rule

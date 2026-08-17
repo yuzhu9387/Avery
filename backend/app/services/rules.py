@@ -46,37 +46,43 @@ def to_spec(rule: Rule) -> RuleSpec:
     )
 
 
-async def list_rules(session: AsyncSession) -> list[Rule]:
-    stmt = select(Rule).order_by(Rule.effective_from.desc(), Rule.id.desc())
+async def list_rules(session: AsyncSession, user_id: int) -> list[Rule]:
+    stmt = (
+        select(Rule)
+        .where(Rule.user_id == user_id)
+        .order_by(Rule.effective_from.desc(), Rule.id.desc())
+    )
     return list((await session.scalars(stmt)).all())
 
 
-async def get_rule(session: AsyncSession, rule_id: int) -> Rule | None:
-    return await session.get(Rule, rule_id)
+async def get_rule(session: AsyncSession, rule_id: int, user_id: int) -> Rule | None:
+    stmt = select(Rule).where(Rule.id == rule_id, Rule.user_id == user_id)
+    return (await session.scalars(stmt)).first()
 
 
-async def get_active_rule(session: AsyncSession) -> Rule | None:
+async def get_active_rule(session: AsyncSession, user_id: int) -> Rule | None:
     stmt = (
         select(Rule)
-        .where(Rule.effective_to.is_(None))
+        .where(Rule.effective_to.is_(None), Rule.user_id == user_id)
         .order_by(Rule.effective_from.desc(), Rule.id.desc())
     )
     return (await session.scalars(stmt)).first()
 
 
-async def create_rule_version(session: AsyncSession, data: RuleCreate) -> Rule:
+async def create_rule_version(session: AsyncSession, data: RuleCreate, user_id: int) -> Rule:
     """Closes the currently open rule and inserts a new one. Never mutates in place."""
     all_tag_ids: set[int] = set(data.exclude_tag_ids)
     for group in data.groups:
         all_tag_ids.update(group.tag_ids)
-    await assert_tags_exist(session, all_tag_ids)
+    await assert_tags_exist(session, all_tag_ids, user_id)
 
     today = date.today()
-    current = await get_active_rule(session)
+    current = await get_active_rule(session, user_id)
     if current is not None:
         current.effective_to = today
 
     rule = Rule(
+        user_id=user_id,
         name=data.name,
         groups=[g.model_dump() for g in data.groups],
         tolerance=data.tolerance,
@@ -91,14 +97,16 @@ async def create_rule_version(session: AsyncSession, data: RuleCreate) -> Rule:
     return rule
 
 
-async def update_rule(session: AsyncSession, rule_id: int, data: RuleUpdate) -> Rule | None:
+async def update_rule(
+    session: AsyncSession, rule_id: int, data: RuleUpdate, user_id: int
+) -> Rule | None:
     """Edits a version in place — name, note, and the ratio definition itself.
 
     A stored Report is unaffected: it snapshots its own `metrics` at generation time
     and never reads its rule back, so changing the ratios here cannot rewrite a past
     report's numbers. See `RuleUpdate` for the provenance trade this accepts.
     """
-    rule = await session.get(Rule, rule_id)
+    rule = await get_rule(session, rule_id, user_id)
     if rule is None:
         return None
     fields = data.model_dump(exclude_unset=True)
@@ -110,7 +118,7 @@ async def update_rule(session: AsyncSession, rule_id: int, data: RuleUpdate) -> 
         tag_id for group in fields.get("groups") or [] for tag_id in group["tag_ids"]
     } | set(fields.get("exclude_tag_ids") or [])
     if referenced:
-        await assert_tags_exist(session, sorted(referenced))
+        await assert_tags_exist(session, sorted(referenced), user_id)
 
     for key, value in fields.items():
         setattr(rule, key, value)
@@ -119,8 +127,8 @@ async def update_rule(session: AsyncSession, rule_id: int, data: RuleUpdate) -> 
     return rule
 
 
-async def delete_rule(session: AsyncSession, rule_id: int) -> bool:
-    rule = await session.get(Rule, rule_id)
+async def delete_rule(session: AsyncSession, rule_id: int, user_id: int) -> bool:
+    rule = await get_rule(session, rule_id, user_id)
     if rule is None:
         return False
     referencing = (

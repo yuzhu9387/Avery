@@ -1,7 +1,7 @@
 export type Verdict = 'pass' | 'over' | 'under'
 export type TaskStatus = 'todo' | 'doing' | 'done' | 'archived'
 export type Priority = 'low' | 'normal' | 'high'
-export type EventSource = 'routine' | 'manual' | 'agent'
+export type EventSource = 'routine' | 'manual' | 'agent' | 'google' | 'lark'
 export type EventKind = 'event' | 'task'
 export type Channel = 'inapp' | 'lark' | 'both'
 
@@ -42,6 +42,11 @@ export interface AveryEvent {
   tag_ids: number[]
   source: EventSource
   routine_block_id: number | null
+  /** The provider's id for a mirrored external event (source google/lark). */
+  external_id: string | null
+  /** A day marker (holiday etc.) from an external calendar: drawn as a banner at
+   *  the top of its day and excluded from every ratio. */
+  all_day: boolean
   notes: string
   kind: EventKind
   completed_at: string | null

@@ -19,6 +19,8 @@ import { useTagMap, useTags } from '../hooks/useTags'
 import { useTagVisibility } from '../hooks/useTagVisibility'
 import { monthRange, usePeriodRatios, useWeek } from '../hooks/useWeek'
 import { addDays, formatDate, formatLocal, formatMinutes, formatTimeRange, mondayOf, parseLocal } from '../lib/datetime'
+import { useExternalSync } from '../hooks/useExternalSync'
+import { useIntegrations } from '../hooks/useAuth'
 import { isEventVisible } from '../lib/tagVisibility'
 import { type MonthCell, buildCells } from '../lib/monthGrid'
 
@@ -88,12 +90,30 @@ export default function MonthPage() {
   // client-side, here and in DayPanel below — the aggregate totals each cell shows
   // (from `month.data`, the server month payload) are untouched, same as their
   // per-day minutes always have been regardless of the rail's checkboxes.
+  const integrations = useIntegrations()
+  const externalCalendars = (['google', 'lark'] as const)
+    .filter((provider) => integrations.data?.[provider].calendar?.connected)
+    .map((provider) => ({
+      provider,
+      email: integrations.data?.[provider].calendar?.account_email ?? '',
+    }))
+  const [hiddenSources, setHiddenSources] = useState<string[]>([])
+  // The month view spans its own range, so it mirrors that range itself rather than
+  // relying on whatever window the week view last synced.
+  useExternalSync('google', rangeStart, rangeEnd, !!integrations.data?.google.calendar?.connected)
+  useExternalSync('lark', rangeStart, rangeEnd, !!integrations.data?.lark.calendar?.connected)
+
   const visibleEvents = useMemo(
     () =>
-      (eventsQuery.data ?? []).filter(
-        (e) => isEventVisible(e.tag_ids, hidden) && (!hideRoutine || e.source !== 'routine'),
-      ),
-    [eventsQuery.data, hidden, hideRoutine],
+      (eventsQuery.data ?? []).filter((e) => {
+        const external = e.source === 'google' || e.source === 'lark'
+        if (external && hiddenSources.includes(e.source)) return false
+        // Untagged mirrors bypass the tag filter: they have not joined Avery's
+        // taxonomy yet, and hiding them would make freshly synced events vanish.
+        if ((!external || e.tag_ids.length > 0) && !isEventVisible(e.tag_ids, hidden)) return false
+        return !(hideRoutine && e.source === 'routine')
+      }),
+    [eventsQuery.data, hidden, hideRoutine, hiddenSources],
   )
 
   /** Cards grouped by the day they *start*. An event running past midnight belongs
@@ -144,10 +164,10 @@ export default function MonthPage() {
       {railOpen && (
         <CalendarSidebar
           selectedWeekStart={thisWeekMonday}
-          // A day picked here can't carry the click through to WeekPage without
-          // lifting week state up to App — out of scope for this pass. Landing on
-          // whatever week WeekPage was last showing is a known limitation.
-          onPickDay={() => navigate('/')}
+          // A real push (not replace) so Back returns to the month view. WeekPage reads
+          // `?week` as the week it shows, which is what lets this carry the chosen day
+          // instead of landing on whatever week that page last had.
+          onPickDay={(day) => navigate(`/?week=${formatDate(mondayOf(day))}`)}
           ratios={ratios}
           view="month"
           periodLabel="This month"
@@ -158,6 +178,13 @@ export default function MonthPage() {
           onToggle={toggle}
           hideRoutine={hideRoutine}
           onToggleHideRoutine={toggleHideRoutine}
+          externalCalendars={externalCalendars}
+          hiddenSources={hiddenSources}
+          onToggleSource={(provider) =>
+            setHiddenSources((prev) =>
+              prev.includes(provider) ? prev.filter((p) => p !== provider) : [...prev, provider],
+            )
+          }
         />
       )}
 

@@ -63,6 +63,41 @@ export function IconRules(props: IconProps) {
   )
 }
 
+/** A person glyph (head + shoulders) for Account — the overlay shell's title row
+ *  and anywhere else the account area needs naming. */
+export function IconAccount(props: IconProps) {
+  return (
+    <svg {...BASE} aria-hidden {...props}>
+      <circle cx="8" cy="5.25" r="2.75" />
+      <path d="M2.75 14.25a5.25 5.25 0 0 1 10.5 0" />
+    </svg>
+  )
+}
+
+/** A "G" monogram for the Google sign-in/connection rows. Drawn as a stroked arc
+ *  with the crossbar into the counter — a brand-neutral mark in `currentColor`,
+ *  per the repo rule of not importing third-party logo assets. */
+export function IconGoogle(props: IconProps) {
+  return (
+    <svg {...BASE} aria-hidden {...props}>
+      <path d="M11.4 4.6A4.8 4.8 0 1 0 12.8 8" />
+      <path d="M12.8 8H8.4" />
+    </svg>
+  )
+}
+
+/** A stylized bird-in-a-square for Lark — rounded tile with an upswept wing, in
+ *  `currentColor` like every other glyph here. */
+export function IconLark(props: IconProps) {
+  return (
+    <svg {...BASE} aria-hidden {...props}>
+      <rect x="1.75" y="1.75" width="12.5" height="12.5" rx="3" />
+      <path d="M4.5 10.75c3.6 0 6.2-2.4 6.9-5.9" />
+      <path d="M4.5 10.75c1.6 0 3-.4 4.1-1.2" />
+    </svg>
+  )
+}
+
 /** A trash-can glyph for the version delete control (item 2) — a proper icon in
  *  place of a bare "×", so the affordance reads as "delete" without hovering. */
 export function IconTrash(props: IconProps) {

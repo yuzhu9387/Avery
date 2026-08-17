@@ -20,8 +20,11 @@ async def test_roll_next_week_targets_the_following_monday(client, session):
     await _routine(client)
     sunday = date(2026, 8, 2)
     result = await roll_next_week(session, sunday)
-    assert result["week_start"] == "2026-08-03"
+    # The roll is now per-user: one signed-in user with one active routine.
     assert result["created"] == 5
+    assert len(result["users"]) == 1
+    assert result["users"][0]["week_start"] == "2026-08-03"
+    assert result["users"][0]["created"] == 5
 
 
 async def test_roll_next_week_is_idempotent(client, session):

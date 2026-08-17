@@ -38,6 +38,8 @@ function makeEvent(overrides: Partial<AveryEvent> & { id: number; task_id: numbe
     tag_ids: [],
     source: 'manual',
     routine_block_id: null,
+    external_id: null,
+    all_day: false,
     notes: '',
     kind: 'event',
     completed_at: null,

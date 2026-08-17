@@ -7,10 +7,12 @@ from datetime import date, datetime, timedelta
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import async_session_factory
+from app.models import Routine
 from app.services import reminders as reminder_service
 from app.services import routines as routine_service
 
@@ -19,18 +21,42 @@ _scheduler: AsyncIOScheduler | None = None
 
 
 async def roll_next_week(session: AsyncSession, today: date) -> dict:
-    """Materialize the week following `today`. Idempotent — safe to run repeatedly."""
+    """Materialize the week following `today` for EVERY user with an active routine.
+
+    Idempotent — safe to run repeatedly. Returns a per-user summary. Every routine
+    has a real owner (Routine.user_id is NOT NULL) — there is no pre-account data
+    left to roll on anyone's behalf.
+    """
     next_monday = today + timedelta(days=8 - today.isoweekday())
-    try:
-        monday, created, skipped = await routine_service.materialize_week(session, next_monday)
-    except routine_service.NoActiveRoutine:
-        logger.warning("week roll skipped: no active routine")
-        return {"week_start": None, "created": 0, "skipped_reason": "no active routine"}
-    return {
-        "week_start": monday.isoformat(),
-        "created": len(created),
-        "skipped_days": [d.isoformat() for d in skipped],
-    }
+
+    owner_ids = (
+        await session.scalars(
+            select(Routine.user_id).where(Routine.is_active.is_(True)).distinct()
+        )
+    ).all()
+    if not owner_ids:
+        logger.warning("week roll skipped: no active routine for any user")
+        return {"created": 0, "users": [], "skipped_reason": "no active routine"}
+
+    users: list[dict] = []
+    total_created = 0
+    for owner_id in owner_ids:
+        try:
+            monday, created, skipped = await routine_service.materialize_week(
+                session, next_monday, owner_id
+            )
+        except routine_service.NoActiveRoutine:  # pragma: no cover — raced away
+            continue
+        total_created += len(created)
+        users.append(
+            {
+                "user_id": owner_id,
+                "week_start": monday.isoformat(),
+                "created": len(created),
+                "skipped_days": [d.isoformat() for d in skipped],
+            }
+        )
+    return {"created": total_created, "users": users}
 
 
 async def sweep_reminders(session: AsyncSession, now: datetime) -> list[int]:

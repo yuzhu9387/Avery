@@ -14,13 +14,18 @@ from app.services import routines as routine_service
 
 async def list_tasks(
     session: AsyncSession,
+    user_id: int,
     *,
     status: TaskStatus | None = None,
     is_floating: bool | None = None,
     floating_only: bool = False,
     include_archived: bool = False,
 ) -> list[Task]:
-    stmt = select(Task).order_by(Task.created_at.desc(), Task.id.desc())
+    stmt = (
+        select(Task)
+        .where(Task.user_id == user_id)
+        .order_by(Task.created_at.desc(), Task.id.desc())
+    )
     if status is not None:
         stmt = stmt.where(Task.status == status)
     if is_floating is not None:
@@ -30,26 +35,28 @@ async def list_tasks(
         # task that has since been given events belongs under Scheduled.
         stmt = stmt.where(
             Task.is_floating.is_(True),
-            ~Task.id.in_(select(Event.task_id)),
+            ~Task.id.in_(select(Event.task_id).where(Event.user_id == user_id)),
         )
     if not include_archived and status != TaskStatus.ARCHIVED:
         stmt = stmt.where(Task.status != TaskStatus.ARCHIVED)
     return list((await session.scalars(stmt)).all())
 
 
-async def get_task(session: AsyncSession, task_id: int) -> Task | None:
-    return await session.get(Task, task_id)
+async def get_task(session: AsyncSession, task_id: int, user_id: int) -> Task | None:
+    """Another user's task is indistinguishable from no task at all."""
+    stmt = select(Task).where(Task.id == task_id, Task.user_id == user_id)
+    return (await session.scalars(stmt)).first()
 
 
 async def task_stats(
-    session: AsyncSession, task_id: int, today: date | None = None
+    session: AsyncSession, task_id: int, user_id: int, today: date | None = None
 ) -> dict | None:
     """Hour rollups and the occurrence lists the Task detail page shows.
 
     `today` is injectable so the result is testable without patching the clock; it
     defaults to the real current date.
     """
-    task = await session.get(Task, task_id)
+    task = await get_task(session, task_id, user_id)
     if task is None:
         return None
 
@@ -61,7 +68,7 @@ async def task_stats(
     )
     now = datetime.combine(anchor, datetime.min.time())
 
-    rows = await event_service.list_events(session, task_id=task_id)
+    rows = await event_service.list_events(session, user_id, task_id=task_id)
 
     def minutes_within(lo: date, hi: date) -> int:
         return sum(
@@ -87,10 +94,10 @@ async def task_stats(
     }
 
 
-async def create_task(session: AsyncSession, data: TaskCreate) -> Task:
-    await tag_service.assert_tags_exist(session, data.tag_ids)
+async def create_task(session: AsyncSession, data: TaskCreate, user_id: int) -> Task:
+    await tag_service.assert_tags_exist(session, data.tag_ids, user_id)
     payload = data.model_dump()
-    task = Task(**payload)
+    task = Task(user_id=user_id, **payload)
     if task.status == TaskStatus.DONE:
         task.completed_at = datetime.now()
     session.add(task)
@@ -99,13 +106,15 @@ async def create_task(session: AsyncSession, data: TaskCreate) -> Task:
     return task
 
 
-async def update_task(session: AsyncSession, task_id: int, data: TaskUpdate) -> Task | None:
-    task = await session.get(Task, task_id)
+async def update_task(
+    session: AsyncSession, task_id: int, data: TaskUpdate, user_id: int
+) -> Task | None:
+    task = await get_task(session, task_id, user_id)
     if task is None:
         return None
     fields = data.model_dump(exclude_unset=True)
     if "tag_ids" in fields:
-        await tag_service.assert_tags_exist(session, fields["tag_ids"])
+        await tag_service.assert_tags_exist(session, fields["tag_ids"], user_id)
     for key, value in fields.items():
         setattr(task, key, value)
     if "status" in fields:
@@ -115,12 +124,12 @@ async def update_task(session: AsyncSession, task_id: int, data: TaskUpdate) -> 
     return task
 
 
-async def archive_task(session: AsyncSession, task_id: int) -> Task | None:
+async def archive_task(session: AsyncSession, task_id: int, user_id: int) -> Task | None:
     """Tasks are never hard-deleted. Events freeze onto a task and carry the minutes
     every ratio is computed from, so removing the row would silently rewrite history —
     the same reason tags archive rather than delete. Idempotent.
     """
-    task = await session.get(Task, task_id)
+    task = await get_task(session, task_id, user_id)
     if task is None:
         return None
     task.status = TaskStatus.ARCHIVED
@@ -130,10 +139,14 @@ async def archive_task(session: AsyncSession, task_id: int) -> Task | None:
 
 
 async def create_by_name(
-    session: AsyncSession, name: str, tag_ids: list[int], due_date: date | None = None
+    session: AsyncSession,
+    name: str,
+    tag_ids: list[int],
+    user_id: int | None,
+    due_date: date | None = None,
 ) -> Task:
     """Always mints a new Task. Used where reuse would be wrong — see create_event."""
-    task = Task(name=name, tag_ids=list(tag_ids), due_date=due_date)
+    task = Task(user_id=user_id, name=name, tag_ids=list(tag_ids), due_date=due_date)
     session.add(task)
     await session.commit()
     await session.refresh(task)
@@ -141,9 +154,10 @@ async def create_by_name(
 
 
 async def find_or_create_by_name(
-    session: AsyncSession, name: str, tag_ids: list[int]
+    session: AsyncSession, name: str, tag_ids: list[int], user_id: int | None
 ) -> Task:
-    """Used by event creation and routine materialization to keep one Task per name.
+    """Used by event creation and routine materialization to keep one Task per name
+    *per user* — two accounts naming a task "Work" must never share a row.
 
     Archived tasks are skipped deliberately: matching them would let the Sunday roll
     re-attach a fresh week of events to a task the user archived, undoing the archive
@@ -151,10 +165,14 @@ async def find_or_create_by_name(
     """
     stmt = (
         select(Task)
-        .where(Task.name == name, Task.status != TaskStatus.ARCHIVED)
+        .where(
+            Task.name == name,
+            Task.status != TaskStatus.ARCHIVED,
+            Task.user_id == user_id,
+        )
         .order_by(Task.id)
     )
     existing = (await session.scalars(stmt)).first()
     if existing is not None:
         return existing
-    return await create_by_name(session, name, tag_ids)
+    return await create_by_name(session, name, tag_ids, user_id)

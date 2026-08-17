@@ -3,6 +3,9 @@ import { NavLink } from 'react-router-dom'
 
 import { ApiError } from '../api/client'
 import type { Evaluation, Tag } from '../api/types'
+import { useMe } from '../hooks/useAuth'
+import { avatarColor, avatarInitial } from '../lib/avatar'
+import { formatDate } from '../lib/datetime'
 import { CategoryRail } from './CategoryRail'
 import { IconRoutine, IconRules, IconTasks } from './icons'
 import { MiniMonth } from './MiniMonth'
@@ -37,6 +40,9 @@ export function CalendarSidebar({
   onToggle,
   hideRoutine,
   onToggleHideRoutine,
+  externalCalendars,
+  hiddenSources,
+  onToggleSource,
 }: {
   selectedWeekStart: Date
   onPickDay: (day: Date) => void
@@ -61,13 +67,31 @@ export function CalendarSidebar({
   onToggle: (id: number) => void
   hideRoutine: boolean
   onToggleHideRoutine: () => void
+  /** Connected external calendars, in display order. Each is a SOURCE toggle:
+   *  their events are ordinary categorised events in every total. */
+  externalCalendars: { provider: 'google' | 'lark'; email: string }[]
+  /** Providers whose events are currently hidden from the calendar. */
+  hiddenSources: string[]
+  onToggleSource: (provider: string) => void
 }) {
   const noActiveRule = ratios.error instanceof ApiError && ratios.error.status === 409
 
-  /** `view` is only appended for the month, so week links stay the short default. */
-  const withView = (params: Record<string, string>) =>
-    `?${new URLSearchParams(view === 'month' ? { ...params, view } : params)}`
-  const footerHref = (to: string) => (view === 'month' ? `${to}?view=month` : to)
+  // Already resolved by the AuthGate before anything under it renders, so this reads
+  // straight from the cache — no second /auth/me request, no loading state to design.
+  const user = useMe().data
+
+  /** What every link out of this rail has to carry so the calendar behind the panel
+   *  stays where the user left it: which view, and — for the week view — which week.
+   *  Without the week, opening Tasks from a future week snapped the backdrop back to
+   *  today, the same way opening anything from the month view used to snap to the
+   *  week grid. */
+  const context: Record<string, string> =
+    view === 'month'
+      ? { view }
+      : { week: formatDate(selectedWeekStart) }
+
+  const linkTo = (to: string, params: Record<string, string> = {}) =>
+    `${to}?${new URLSearchParams({ ...params, ...context })}`
 
   return (
     <aside className="flex w-64 shrink-0 flex-col border-r border-line bg-surface">
@@ -94,12 +118,12 @@ export function CalendarSidebar({
               compact
               hrefForGroup={(key) => {
                 const label = ratios.data.metrics.groups.find((g) => g.key === key)?.label ?? key
-                return `/events${withView({
+                return linkTo('/events', {
                   start: periodStart,
                   end: periodEnd,
                   group: key,
                   label: `${label} · ${periodLabel.toLowerCase()}`,
-                })}`
+                })
               }}
             />
           )}
@@ -109,12 +133,12 @@ export function CalendarSidebar({
           <CategoryRail
             hrefForTag={(id) => {
               const name = tags.find((t) => t.id === id)?.name ?? `Tag ${id}`
-              return `/events${withView({
+              return linkTo('/events', {
                 start: periodStart,
                 end: periodEnd,
                 tag: String(id),
                 label: `${name} · ${periodLabel.toLowerCase()}`,
-              })}`
+              })
             }}
             tags={tags}
             minutesByTag={ratios.data?.metrics.minutes_by_primary_tag ?? {}}
@@ -124,6 +148,42 @@ export function CalendarSidebar({
             hideRoutine={hideRoutine}
             onToggleHideRoutine={onToggleHideRoutine}
           />
+
+          {externalCalendars.length > 0 && (
+            /* Below a divider and outside CategoryRail: the rows above are Avery's
+               own tags, aggregated by minutes. These are SOURCES, not categories —
+               each mirrored event carries an Avery tag of its own and is counted
+               under that tag above. This section only toggles their visibility. */
+            <div className="mt-3 border-t border-line pt-3">
+              <h3 className="mb-2 text-[10px] font-bold uppercase tracking-wide text-ink-faint">
+                External calendars
+              </h3>
+              {externalCalendars.map(({ provider, email }) => (
+                <label
+                  key={provider}
+                  className="flex cursor-pointer items-center gap-2 py-[3px]"
+                >
+                  <input
+                    type="checkbox"
+                    checked={!hiddenSources.includes(provider)}
+                    onChange={() => onToggleSource(provider)}
+                    aria-label={`Show events from ${email}`}
+                  />
+                  <span
+                    aria-hidden
+                    className="h-2 w-2 shrink-0 rounded-full"
+                    style={{ background: `var(--external-${provider})` }}
+                  />
+                  <span className="min-w-0 flex-1 truncate text-xs text-ink-muted">
+                    {/* Provider first: the same address is often connected to both,
+                        and two identical rows tell you nothing about which is which. */}
+                    <span className="capitalize">{provider}</span>
+                    {email && <span className="text-ink-faint"> · {email}</span>}
+                  </span>
+                </label>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
@@ -136,7 +196,7 @@ export function CalendarSidebar({
         {FOOTER_LINKS.map(({ to, Icon, label }, i) => (
           <NavLink
             key={to}
-            to={footerHref(to)}
+            to={linkTo(to)}
             className={({ isActive }) =>
               [FOOTER_LINK, i < FOOTER_LINKS.length - 1 ? 'mb-0.5' : '', isActive ? FOOTER_LINK_ACTIVE : FOOTER_LINK_INACTIVE].join(' ')
             }
@@ -145,6 +205,35 @@ export function CalendarSidebar({
             {label}
           </NavLink>
         ))}
+
+        {/* The account row: same linkTo() as the footer links above, so opening
+         *  Account keeps the calendar behind the panel on the week/month the user
+         *  was looking at instead of snapping back to today. */}
+        {user && (
+          <div className="mt-2 border-t border-line pt-2">
+            <NavLink
+              to={linkTo('/account')}
+              className={({ isActive }) =>
+                [
+                  'flex items-center gap-2 rounded-full px-2 py-1.5 transition-colors',
+                  isActive ? 'bg-[var(--pale)]' : 'hover:bg-[var(--pale)]/50',
+                ].join(' ')
+              }
+            >
+              <span
+                aria-hidden
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold text-ink"
+                style={{ background: avatarColor(user.id) }}
+              >
+                {avatarInitial(user.name, user.email)}
+              </span>
+              <span className="flex min-w-0 flex-col">
+                <span className="truncate text-sm font-bold text-ink">{user.name}</span>
+                <span className="truncate text-[11px] text-ink-faint">{user.email}</span>
+              </span>
+            </NavLink>
+          </div>
+        )}
       </div>
     </aside>
   )

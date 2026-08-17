@@ -57,7 +57,13 @@ export function MonthChip({
     // No `onDragStart`: see the hook's docstring.
   })
 
-  const color = tag?.color ?? 'var(--pale)'
+  const external =
+    event.source === 'google'
+      ? 'var(--external-google)'
+      : event.source === 'lark'
+        ? 'var(--external-lark)'
+        : null
+  const color = external ?? tag?.color ?? 'var(--pale)'
   const isTask = event.kind === 'task'
   const isDone = event.completed_at !== null
   const time = formatTimeRange(event.start_at, event.end_at)

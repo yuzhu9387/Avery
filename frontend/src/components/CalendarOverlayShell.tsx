@@ -4,7 +4,7 @@ import { Outlet, useLocation, useNavigate, useOutletContext, useSearchParams } f
 import type { HeaderSlot } from '../App'
 import MonthPage from '../pages/MonthPage'
 import WeekPage from '../pages/WeekPage'
-import { IconRoutine, IconRules, IconTasks } from './icons'
+import { IconAccount, IconRoutine, IconRules, IconTasks } from './icons'
 
 type IconComponent = typeof IconTasks
 
@@ -12,6 +12,7 @@ const TITLES: Record<string, { Icon: IconComponent | null; label: string }> = {
   '/tasks': { Icon: IconTasks, label: 'Tasks' },
   '/routine': { Icon: IconRoutine, label: 'Routine' },
   '/rules': { Icon: IconRules, label: 'Rules' },
+  '/account': { Icon: IconAccount, label: 'Account' },
 }
 
 /** Detail routes (`/events/:id`, `/tasks/:id`) also live under this shell (see
@@ -60,7 +61,11 @@ export function CalendarOverlayShell() {
   // its links and this reads it back — without that, opening anything from the month
   // view swapped the backdrop to the week grid and threw the user out of the month.
   const view = params.get('view') === 'month' ? 'month' : 'week'
-  const close = () => navigate(view === 'month' ? '/month' : '/')
+  const week = params.get('week')
+  // Closing returns to the calendar the panel was opened from, on the same week —
+  // not to a default that quietly moves the user.
+  const close = () =>
+    navigate(view === 'month' ? '/month' : week ? `/?week=${week}` : '/')
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

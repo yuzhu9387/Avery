@@ -17,6 +17,11 @@
   --clay: #c9a88f;
   --rose: #da96a4;
   --rose-deep: #c97b8b;
+  /* External calendar sources. One fixed colour per provider, deliberately NOT
+     from the spring-mountain palette: these cards represent someone else's
+     calendar, and reading as slightly foreign is the point. */
+  --external-google: rgba(234, 67, 53, 0.5);   /* Google logo red @ 50% */
+  --external-lark: rgba(51, 112, 255, 0.5);    /* Lark brand blue @ 50% */
   --teal: #8fa8a2;
 
   --pass: #8fa8a2;

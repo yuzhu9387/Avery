@@ -17,13 +17,13 @@ def _is_materializable(monday: date) -> bool:
 
 
 async def get_week(
-    session: AsyncSession, any_day: date, allow_materialize: bool = True
+    session: AsyncSession, any_day: date, user_id: int, allow_materialize: bool = True
 ) -> dict:
     monday, next_monday = routine_service.week_bounds(any_day)
     start = datetime.combine(monday, datetime.min.time())
     end = datetime.combine(next_monday, datetime.min.time())
 
-    rows = await event_service.list_events(session, start=start, end=end)
+    rows = await event_service.list_events(session, user_id, start=start, end=end)
     # An event bleeding in from the previous week is not the user having touched this
     # one. Gating on overlap let a single Sunday-night block suppress the whole week's
     # materialization, leaving a blank Monday.
@@ -32,7 +32,7 @@ async def get_week(
 
     if not starts_here and allow_materialize and _is_materializable(monday):
         try:
-            _, created, _ = await routine_service.materialize_week(session, monday)
+            _, created, _ = await routine_service.materialize_week(session, monday, user_id)
         except routine_service.NoActiveRoutine:
             pass
         else:
@@ -41,7 +41,7 @@ async def get_week(
             # creates nothing, and reporting true there tells the UI a lie.
             materialized = bool(created)
             if created:
-                rows = await event_service.list_events(session, start=start, end=end)
+                rows = await event_service.list_events(session, user_id, start=start, end=end)
 
     return {
         "week_start": monday.isoformat(),
@@ -51,13 +51,14 @@ async def get_week(
     }
 
 
-async def get_month(session: AsyncSession, year: int, month: int) -> dict:
+async def get_month(session: AsyncSession, year: int, month: int, user_id: int) -> dict:
     first = date(year, month, 1)
     days_in_month = calendar_lib.monthrange(year, month)[1]
     last_exclusive = first + timedelta(days=days_in_month)
 
     rows: list[Event] = await event_service.list_events(
         session,
+        user_id,
         start=datetime.combine(first, datetime.min.time()),
         end=datetime.combine(last_exclusive, datetime.min.time()),
     )

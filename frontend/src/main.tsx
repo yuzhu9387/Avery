@@ -4,7 +4,9 @@ import { createRoot } from 'react-dom/client'
 import { RouterProvider, createBrowserRouter } from 'react-router-dom'
 
 import App from './App'
+import LoginPage from './pages/LoginPage'
 import { CalendarOverlayShell } from './components/CalendarOverlayShell'
+import AccountPage from './pages/AccountPage'
 import EventDetailPage from './pages/EventDetailPage'
 import EventsListPage from './pages/EventsListPage'
 import MonthPage from './pages/MonthPage'
@@ -20,6 +22,10 @@ const queryClient = new QueryClient({
 })
 
 const router = createBrowserRouter([
+  // Its own URL, deliberately outside the App layout: the login screen must render
+  // without the app header/rail, and needs an address of its own so the backend's
+  // OAuth callback can redirect to `/login?link_token=...` as a real page.
+  { path: '/login', element: <LoginPage /> },
   {
     path: '/',
     element: <App />,
@@ -37,6 +43,7 @@ const router = createBrowserRouter([
           { path: 'tasks', element: <TasksPage /> },
           { path: 'routine', element: <RoutinePage /> },
           { path: 'rules', element: <RulesPage /> },
+          { path: 'account', element: <AccountPage /> },
           { path: 'tasks/:taskId', element: <TaskDetailPage /> },
           { path: 'events/:eventId', element: <EventDetailPage /> },
         ],

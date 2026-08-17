@@ -143,10 +143,11 @@ async def test_find_or_create_skips_an_archived_task(client, session):
     user had archived, silently undoing the archive every week."""
     from app.services import tasks as service
 
-    first = await service.find_or_create_by_name(session, "Work", [])
+    user_id = (await client.get("/api/auth/me")).json()["id"]
+    first = await service.find_or_create_by_name(session, "Work", [], user_id)
     await client.delete(f"/api/tasks/{first.id}")
 
-    second = await service.find_or_create_by_name(session, "Work", [])
+    second = await service.find_or_create_by_name(session, "Work", [], user_id)
     assert second.id != first.id
     assert second.status == "todo"
 

@@ -19,8 +19,10 @@ class EventCreate(BaseModel):
 
     @model_validator(mode="after")
     def check(self) -> "EventCreate":
-        if self.task_id is None and not self.task_name:
-            raise ValueError("either task_id or task_name is required")
+        # An event needs SOME name. A bare title is the normal case now that events
+        # carry their own; task_id/task_name still work for scheduling a to-do.
+        if self.task_id is None and not self.task_name and not (self.title or "").strip():
+            raise ValueError("one of title, task_id or task_name is required")
         if self.end_at <= self.start_at:
             raise ValueError("end_at must be after start_at")
         return self
@@ -65,6 +67,10 @@ class EventOut(BaseModel):
     completed_at: datetime | None
     source: EventSource
     routine_block_id: int | None
+    # The provider's id for a mirrored external event; the frontend uses source +
+    # external_id to know a card is a mirror (colored, edits push back).
+    external_id: str | None
+    all_day: bool
     notes: str
 
 

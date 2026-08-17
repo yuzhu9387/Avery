@@ -5,6 +5,8 @@ from pydantic import BaseModel, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
+from app.deps import get_current_user
+from app.models import User
 from app.schemas.rule import RuleOut
 from app.services import evaluation as service
 
@@ -27,11 +29,12 @@ class EvaluateRequest(BaseModel):
 
 @router.post("/evaluate")
 async def evaluate_period(
-    body: EvaluateRequest, session: AsyncSession = Depends(get_session)
+    body: EvaluateRequest, session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user)
 ) -> dict:
     try:
         result, rule = await service.evaluate_period(
-            session, body.period_start, body.period_end, body.rule_id
+            session, body.period_start, body.period_end, user.id, body.rule_id
         )
     except service.NoActiveRule:
         raise HTTPException(status.HTTP_409_CONFLICT, "no active rule — create one first")

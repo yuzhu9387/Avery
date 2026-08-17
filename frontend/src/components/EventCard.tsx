@@ -8,7 +8,7 @@ import { DONE_OPACITY, chipShape } from '../lib/chipStyle'
 export const CARD_RIGHT_GUTTER_PX = 12
 
 /** The left inset every card keeps from the day column's edge, at any column count. */
-const CARD_LEFT_PX = 2
+export const CARD_LEFT_PX = 2
 
 /** Horizontal breathing room between two side-by-side conflicting cards, so they
  *  read as two distinct cards rather than one wide one. */
@@ -103,7 +103,16 @@ export function EventCard({
   isDragging?: boolean
   dragOffset?: { dx: number; dy: number }
 }) {
-  const color = tag?.color ?? 'var(--pale)'
+  // A mirrored external event always wears its provider's colour — one fixed red
+  // for Google, one blue for Lark — so foreign events read as foreign at a glance
+  // even after they've been given an Avery category.
+  const external =
+    event.source === 'google'
+      ? 'var(--external-google)'
+      : event.source === 'lark'
+        ? 'var(--external-lark)'
+        : null
+  const color = external ?? tag?.color ?? 'var(--pale)'
   const isTask = event.kind === 'task'
   const isDone = event.completed_at !== null
 

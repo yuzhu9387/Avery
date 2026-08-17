@@ -69,17 +69,22 @@ class SeedTagsMissing(Exception):
         self.names = names
 
 
-async def _any(session: AsyncSession, model) -> bool:
-    return (await session.scalars(select(model.id).limit(1))).first() is not None
+async def _any(session: AsyncSession, model, user_id: int) -> bool:
+    stmt = select(model.id).where(model.user_id == user_id).limit(1)
+    return (await session.scalars(stmt)).first() is not None
 
 
-async def seed_all(session: AsyncSession) -> dict[str, int]:
+async def seed_all(session: AsyncSession, user_id: int) -> dict[str, int]:
+    """Seeds *for one user*. Idempotent per user; a second account seeding gets
+    its own tags/rule/routine without touching anyone else's."""
     created = {"tags": 0, "rules": 0, "routines": 0}
 
-    if not await _any(session, Tag):
+    if not await _any(session, Tag, user_id):
         for index, (name, color, icon) in enumerate(SEED_TAGS):
             await tag_service.create_tag(
-                session, TagCreate(name=name, color=color, icon=icon, sort_order=index)
+                session,
+                TagCreate(name=name, color=color, icon=icon, sort_order=index),
+                user_id,
             )
             created["tags"] += 1
 
@@ -87,11 +92,12 @@ async def seed_all(session: AsyncSession) -> dict[str, int]:
     # still a real row whose id the rule and routine must keep pointing at. Excluding
     # them here turned a re-seed into a KeyError.
     by_name = {
-        t.name: t.id for t in await tag_service.list_tags(session, include_archived=True)
+        t.name: t.id
+        for t in await tag_service.list_tags(session, user_id, include_archived=True)
     }
 
-    needs_rule = not await _any(session, Rule)
-    needs_routine = not await _any(session, Routine)
+    needs_rule = not await _any(session, Rule, user_id)
+    needs_routine = not await _any(session, Routine, user_id)
     if needs_rule or needs_routine:
         missing = [name for name, _, _ in SEED_TAGS if name not in by_name]
         if missing:
@@ -100,7 +106,7 @@ async def seed_all(session: AsyncSession) -> dict[str, int]:
     if needs_rule:
         await rule_service.create_rule_version(
             session,
-            RuleCreate(
+            data=RuleCreate(
                 name="6:3:1 baseline",
                 tolerance=0.2,
                 exclude_tag_ids=[by_name["Rest"], by_name["Personal"]],
@@ -121,11 +127,12 @@ async def seed_all(session: AsyncSession) -> dict[str, int]:
                     RuleGroup(key="C", label="Fitness", ratio=1, tag_ids=[by_name["Fitness"]]),
                 ],
             ),
+            user_id=user_id,
         )
         created["rules"] += 1
 
     if needs_routine:
-        routine = Routine(name="Default week", is_active=True)
+        routine = Routine(user_id=user_id, name="Default week", is_active=True)
         session.add(routine)
         await session.flush()  # assigns routine.id without committing
         for order, (days, start, end, task_name, tag_name) in enumerate(SEED_BLOCKS):

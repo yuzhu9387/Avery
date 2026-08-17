@@ -5,7 +5,7 @@ import { moveEvent, updateEvent } from '../api/events'
 import { invalidateCalendar } from '../api/invalidate'
 import type { AveryEvent } from '../api/types'
 import type { GestureOrigin } from './useCardGestures'
-import { resolveDrag } from '../lib/drag'
+import { dayColumnDelta, resolveDrag } from '../lib/drag'
 import { pxToMinutes } from '../lib/geometry'
 
 /** A live pointer offset for whichever event is mid-drag. Purely visual — the
@@ -50,9 +50,16 @@ export function useEventDrag(pxPerHour: number) {
   const beginMove = useCallback(
     (event: AveryEvent, origin: GestureOrigin) => {
       const el = origin.el
-      // Measured, not assumed: the day column is this card's parent, and reading its
-      // width here keeps deltaDays correct across window resizes and zoom changes.
-      const columnWidth = el.parentElement?.getBoundingClientRect().width ?? 0
+      // `closest`, not `parentElement`. The card's parent is a `display: contents`
+      // wrapper (WeekGrid groups the card with its resize handles), and such an
+      // element generates no box — `getBoundingClientRect()` on it is all zeros. That
+      // made `columnWidth` 0, which the guard in `dayColumnDelta` turns into "no day
+      // change", so dragging only ever adjusted the time within the original day.
+      // Measured live rather than assumed so the shift stays right across window
+      // resizes and zoom changes.
+      const columnRect = el.closest('[data-day-column]')?.getBoundingClientRect()
+      const columnLeft = columnRect?.left ?? 0
+      const columnWidth = columnRect?.width ?? 0
       const originX = origin.clientX
       const originY = origin.clientY
 
@@ -79,7 +86,7 @@ export function useEventDrag(pxPerHour: number) {
 
       const handleUp = (ev: PointerEvent) => {
         const deltaMinutes = pxToMinutes(ev.clientY - originY, pxPerHour)
-        const deltaDays = columnWidth > 0 ? Math.round((ev.clientX - originX) / columnWidth) : 0
+        const deltaDays = dayColumnDelta(ev.clientX, columnLeft, columnWidth)
         finish()
         const plan = resolveDrag(event, { kind: 'move', deltaMinutes, deltaDays })
         if (!plan || plan.kind !== 'move') return

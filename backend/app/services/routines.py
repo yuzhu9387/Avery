@@ -36,19 +36,25 @@ def week_bounds(any_day: date) -> tuple[date, date]:
     return monday, monday + timedelta(days=7)
 
 
-async def list_routines(session: AsyncSession) -> list[Routine]:
+async def list_routines(session: AsyncSession, user_id: int) -> list[Routine]:
     """Every version, most recently changed first — the order the version list shows.
 
     `id desc` breaks ties: two versions created in the same clock tick (which the
     tests do, and a fast double-click can) would otherwise come back in an
     arbitrary order and the list would appear to shuffle between loads.
     """
-    stmt = select(Routine).order_by(Routine.updated_at.desc(), Routine.id.desc())
+    stmt = (
+        select(Routine)
+        .where(Routine.user_id == user_id)
+        .order_by(Routine.updated_at.desc(), Routine.id.desc())
+    )
     return list((await session.scalars(stmt)).all())
 
 
-async def _deactivate_others(session: AsyncSession, keep_id: int | None) -> None:
-    """Enforce at most one active routine.
+async def _deactivate_others(
+    session: AsyncSession, keep_id: int | None, user_id: int | None
+) -> None:
+    """Enforce at most one active routine *per user*.
 
     Nothing in the schema enforces this, and before it was enforced here the
     consequence was silent: `create_routine` defaulted `is_active=True` without
@@ -57,7 +63,7 @@ async def _deactivate_others(session: AsyncSession, keep_id: int | None) -> None
     so week materialization read an empty routine and generated nothing —
     with no error anywhere.
     """
-    stmt = select(Routine).where(Routine.is_active.is_(True))
+    stmt = select(Routine).where(Routine.is_active.is_(True), Routine.user_id == user_id)
     for other in (await session.scalars(stmt)).all():
         if other.id != keep_id:
             other.is_active = False
@@ -75,28 +81,32 @@ async def touch_routine(session: AsyncSession, routine_id: int) -> None:
         routine.updated_at = datetime.now()
 
 
-async def get_routine(session: AsyncSession, routine_id: int) -> Routine | None:
+async def get_routine(
+    session: AsyncSession, routine_id: int, user_id: int
+) -> Routine | None:
     # populate_existing re-runs the selectin load of `blocks`. Without it, a Routine
     # already in the identity map returns a stale block list after an add or delete.
     stmt = (
         select(Routine)
-        .where(Routine.id == routine_id)
+        .where(Routine.id == routine_id, Routine.user_id == user_id)
         .execution_options(populate_existing=True)
     )
     return (await session.scalars(stmt)).first()
 
 
-async def get_active_routine(session: AsyncSession) -> Routine | None:
+async def get_active_routine(session: AsyncSession, user_id: int | None) -> Routine | None:
     stmt = (
         select(Routine)
-        .where(Routine.is_active.is_(True))
+        .where(Routine.is_active.is_(True), Routine.user_id == user_id)
         .order_by(Routine.id.desc())
         .execution_options(populate_existing=True)
     )
     return (await session.scalars(stmt)).first()
 
 
-async def create_routine(session: AsyncSession, data: RoutineCreate) -> Routine:
+async def create_routine(
+    session: AsyncSession, data: RoutineCreate, user_id: int
+) -> Routine:
     fields = data.model_dump()
     copy_blocks = fields.pop("copy_blocks_from_active")
 
@@ -104,11 +114,11 @@ async def create_routine(session: AsyncSession, data: RoutineCreate) -> Routine:
     if copy_blocks:
         # Read the source before adding the new routine: creating an active one
         # deactivates the old active, which is exactly the routine we want to copy.
-        active = await get_active_routine(session)
+        active = await get_active_routine(session, user_id)
         if active is not None:
             source_blocks = list(active.blocks)
 
-    routine = Routine(**fields)
+    routine = Routine(user_id=user_id, **fields)
     session.add(routine)
     await session.flush()  # assigns routine.id, needed for the copied blocks
 
@@ -126,16 +136,16 @@ async def create_routine(session: AsyncSession, data: RoutineCreate) -> Routine:
         )
 
     if routine.is_active:
-        await _deactivate_others(session, keep_id=routine.id)
+        await _deactivate_others(session, keep_id=routine.id, user_id=user_id)
 
     await session.commit()
-    return await get_routine(session, routine.id)
+    return await get_routine(session, routine.id, user_id)
 
 
 async def update_routine(
-    session: AsyncSession, routine_id: int, data: RoutineUpdate
+    session: AsyncSession, routine_id: int, data: RoutineUpdate, user_id: int
 ) -> Routine | None:
-    routine = await session.get(Routine, routine_id)
+    routine = await get_routine(session, routine_id, user_id)
     if routine is None:
         return None
     fields = data.model_dump(exclude_unset=True)
@@ -151,13 +161,13 @@ async def update_routine(
     # Activating this version is what retires whichever one was active before;
     # that is the whole mechanism for switching back to an older version.
     if routine.is_active:
-        await _deactivate_others(session, keep_id=routine.id)
+        await _deactivate_others(session, keep_id=routine.id, user_id=user_id)
     await session.commit()
-    return await get_routine(session, routine_id)
+    return await get_routine(session, routine_id, user_id)
 
 
-async def delete_routine(session: AsyncSession, routine_id: int) -> bool:
-    routine = await session.get(Routine, routine_id)
+async def delete_routine(session: AsyncSession, routine_id: int, user_id: int) -> bool:
+    routine = await get_routine(session, routine_id, user_id)
     if routine is None:
         return False
     if routine.is_active:
@@ -167,12 +177,24 @@ async def delete_routine(session: AsyncSession, routine_id: int) -> bool:
     return True
 
 
-async def create_block(
-    session: AsyncSession, routine_id: int, data: RoutineBlockCreate
+async def get_block(
+    session: AsyncSession, block_id: int, user_id: int
 ) -> RoutineBlock | None:
-    if await session.get(Routine, routine_id) is None:
+    """Blocks carry no user_id of their own — ownership flows through the routine."""
+    stmt = (
+        select(RoutineBlock)
+        .join(Routine, RoutineBlock.routine_id == Routine.id)
+        .where(RoutineBlock.id == block_id, Routine.user_id == user_id)
+    )
+    return (await session.scalars(stmt)).first()
+
+
+async def create_block(
+    session: AsyncSession, routine_id: int, data: RoutineBlockCreate, user_id: int
+) -> RoutineBlock | None:
+    if await get_routine(session, routine_id, user_id) is None:
         return None
-    await tag_service.assert_tags_exist(session, data.tag_ids)
+    await tag_service.assert_tags_exist(session, data.tag_ids, user_id)
     block = RoutineBlock(routine_id=routine_id, **data.model_dump())
     session.add(block)
     await touch_routine(session, routine_id)
@@ -182,14 +204,14 @@ async def create_block(
 
 
 async def update_block(
-    session: AsyncSession, block_id: int, data: RoutineBlockUpdate
+    session: AsyncSession, block_id: int, data: RoutineBlockUpdate, user_id: int
 ) -> RoutineBlock | None:
-    block = await session.get(RoutineBlock, block_id)
+    block = await get_block(session, block_id, user_id)
     if block is None:
         return None
     fields = data.model_dump(exclude_unset=True)
     if "tag_ids" in fields:
-        await tag_service.assert_tags_exist(session, fields["tag_ids"])
+        await tag_service.assert_tags_exist(session, fields["tag_ids"], user_id)
     for key, value in fields.items():
         setattr(block, key, value)
     await touch_routine(session, block.routine_id)
@@ -198,8 +220,8 @@ async def update_block(
     return block
 
 
-async def delete_block(session: AsyncSession, block_id: int) -> bool:
-    block = await session.get(RoutineBlock, block_id)
+async def delete_block(session: AsyncSession, block_id: int, user_id: int) -> bool:
+    block = await get_block(session, block_id, user_id)
     if block is None:
         return False
     # Read the parent id before the delete: afterwards `block` is detached and
@@ -211,7 +233,9 @@ async def delete_block(session: AsyncSession, block_id: int) -> bool:
     return True
 
 
-async def _days_with_events(session: AsyncSession, monday: date, next_monday: date) -> set[date]:
+async def _days_with_events(
+    session: AsyncSession, monday: date, next_monday: date, user_id: int | None
+) -> set[date]:
     """Days on which the user already has something scheduled.
 
     Occupancy is judged by where an event *starts*, not by every day it touches.
@@ -227,6 +251,7 @@ async def _days_with_events(session: AsyncSession, monday: date, next_monday: da
     """
     rows = await event_service.list_events(
         session,
+        user_id,
         start=datetime.combine(monday, datetime.min.time()),
         end=datetime.combine(next_monday, datetime.min.time()),
     )
@@ -236,7 +261,7 @@ async def _days_with_events(session: AsyncSession, monday: date, next_monday: da
 
 
 async def _resolve_inherited_tags(
-    session: AsyncSession, task_name: str, cache: dict[str, list[int]]
+    session: AsyncSession, task_name: str, cache: dict[str, list[int]], user_id: int | None
 ) -> list[int]:
     """Tags a block with no tags of its own inherits from a same-named Task.
 
@@ -244,13 +269,18 @@ async def _resolve_inherited_tags(
     routine blocks, but a task of that name may still exist (created by hand, or
     a leftover from before this change), and its tags are still the fallback a
     block with none of its own should pick up. Archived tasks are skipped: an
-    archived task's tags must not leak into newly materialized events.
+    archived task's tags must not leak into newly materialized events. Scoped to
+    the routine's owner: another user's same-named task donates nothing.
     """
     if task_name not in cache:
         existing = (
             await session.scalars(
                 select(Task)
-                .where(Task.name == task_name, Task.status != TaskStatus.ARCHIVED)
+                .where(
+                    Task.name == task_name,
+                    Task.status != TaskStatus.ARCHIVED,
+                    Task.user_id == user_id,
+                )
                 .order_by(Task.id)
             )
         ).first()
@@ -259,7 +289,7 @@ async def _resolve_inherited_tags(
 
 
 async def preview_week(
-    session: AsyncSession, any_day: date, routine: Routine | None = None
+    session: AsyncSession, any_day: date, user_id: int | None, routine: Routine | None = None
 ) -> tuple[date, list[dict]] | None:
     """What materialize_week WOULD create, without writing anything.
 
@@ -268,12 +298,12 @@ async def preview_week(
     actually gets created is worse than no preview.
     """
     if routine is None:
-        routine = await get_active_routine(session)
+        routine = await get_active_routine(session, user_id)
     if routine is None:
         return None
 
     monday, next_monday = week_bounds(any_day)
-    occupied = await _days_with_events(session, monday, next_monday)
+    occupied = await _days_with_events(session, monday, next_monday, user_id)
 
     # Mirrors materialize_week's tag fallback: a block declaring no tags of its own
     # inherits a same-named task's, resolved read-only so preview stays a pure read
@@ -283,7 +313,7 @@ async def preview_week(
     async def tags_for(block: RoutineBlock) -> list[int]:
         if block.tag_ids:
             return list(block.tag_ids)
-        return await _resolve_inherited_tags(session, block.task_name, task_tags)
+        return await _resolve_inherited_tags(session, block.task_name, task_tags, user_id)
 
     rows: list[dict] = []
     for offset in range(7):
@@ -311,9 +341,9 @@ async def preview_week(
 
 
 async def materialize_week(
-    session: AsyncSession, any_day: date, routine: Routine | None = None
+    session: AsyncSession, any_day: date, user_id: int | None, routine: Routine | None = None
 ) -> tuple[date, list[Event], list[date]]:
-    """Create routine events for the week containing `any_day`.
+    """Create routine events for the week containing `any_day`, for one user.
 
     Days that already hold any event are skipped entirely, so materialization never
     merges into a day the user has already touched, and a re-run is a no-op.
@@ -330,12 +360,12 @@ async def materialize_week(
     failure mode has to be impossible rather than merely unlikely.
     """
     if routine is None:
-        routine = await get_active_routine(session)
+        routine = await get_active_routine(session, user_id)
     if routine is None:
         raise NoActiveRoutine()
 
     monday, next_monday = week_bounds(any_day)
-    occupied = await _days_with_events(session, monday, next_monday)
+    occupied = await _days_with_events(session, monday, next_monday, user_id)
     skipped = sorted(occupied)
 
     wanted: list[tuple[date, RoutineBlock]] = []
@@ -355,12 +385,13 @@ async def materialize_week(
         if end <= start:  # crosses midnight
             end += timedelta(days=1)
         event = Event(
+            user_id=user_id,
             task_id=None,
             title=block.task_name,
             start_at=start,
             end_at=end,
             tag_ids=list(block.tag_ids)
-            or await _resolve_inherited_tags(session, block.task_name, tag_cache),
+            or await _resolve_inherited_tags(session, block.task_name, tag_cache, user_id),
             source=EventSource.ROUTINE,
             routine_block_id=block.id,
         )

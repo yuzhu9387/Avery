@@ -1,5 +1,7 @@
 import { useState } from 'react'
-import { Link, Outlet } from 'react-router-dom'
+import { Link, Navigate, Outlet } from 'react-router-dom'
+
+import { useMe } from './hooks/useAuth'
 
 /** `railOpen` rides the outlet context so a page's own left-hand chrome
  *  (CalendarSidebar's mini-month/categories aside) can collapse in lockstep with
@@ -12,7 +14,30 @@ export interface HeaderSlot {
 
 export default function App() {
   const [railOpen, setRailOpen] = useState(true)
+  const me = useMe()
 
+  // The AuthGate. Three states, no routes involved — a swap here is simpler and more
+  // robust than an auth redirect, and it means a signed-out deep link to /tasks keeps
+  // its URL and lands exactly there once the cookie exists.
+  //
+  // 1. Still asking /auth/me: a quiet splash rather than a flash of the login form
+  //    at every reload for users who are in fact signed in (the common case).
+  if (me.isPending) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3">
+        <img src="/avery-logo.png" alt="" width={48} height={48} />
+        <span className="font-display text-2xl font-semibold tracking-tight">Avery</span>
+      </div>
+    )
+  }
+
+  // 2. No user — a 401 resolves to `data: null` (see useMe), and a genuinely failed
+  //    request lands here too: the login page is the one screen that can still do
+  //    something useful about it. A real redirect to /login (not an in-place swap),
+  //    so signing in has its own URL and the address bar tells the truth.
+  if (!me.data) return <Navigate to="/login" replace />
+
+  // 3. Signed in — the app, exactly as before the gate existed.
   return (
     <div className="flex h-full flex-col">
       <header className="flex shrink-0 items-center gap-3 border-b border-line bg-surface px-4 py-2">

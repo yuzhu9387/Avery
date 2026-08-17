@@ -42,12 +42,13 @@ def month_bounds(year: int, month: int) -> tuple[date, date, datetime, datetime]
     return first, last, start_dt, end_dt
 
 
-async def run_report(session: AsyncSession, year: int, month: int) -> Report:
+async def run_report(session: AsyncSession, year: int, month: int, user_id: int) -> Report:
     """Always inserts. The active rule at this moment is frozen onto the row."""
     first, last, start_dt, end_dt = month_bounds(year, month)
-    result, rule = await evaluation_service.evaluate_period(session, start_dt, end_dt)
+    result, rule = await evaluation_service.evaluate_period(session, start_dt, end_dt, user_id)
 
     report = Report(
+        user_id=user_id,
         period_start=first,
         period_end=last,
         rule_id=rule.id,
@@ -60,8 +61,14 @@ async def run_report(session: AsyncSession, year: int, month: int) -> Report:
     return report
 
 
-async def list_reports(session: AsyncSession, month_key: str | None = None) -> list[Report]:
-    stmt = select(Report).order_by(Report.created_at.desc(), Report.id.desc())
+async def list_reports(
+    session: AsyncSession, user_id: int, month_key: str | None = None
+) -> list[Report]:
+    stmt = (
+        select(Report)
+        .where(Report.user_id == user_id)
+        .order_by(Report.created_at.desc(), Report.id.desc())
+    )
     if month_key is not None:
         year, month = parse_month_key(month_key)
         first, _, _, _ = month_bounds(year, month)
@@ -69,12 +76,13 @@ async def list_reports(session: AsyncSession, month_key: str | None = None) -> l
     return list((await session.scalars(stmt)).all())
 
 
-async def get_report(session: AsyncSession, report_id: int) -> Report | None:
-    return await session.get(Report, report_id)
+async def get_report(session: AsyncSession, report_id: int, user_id: int) -> Report | None:
+    stmt = select(Report).where(Report.id == report_id, Report.user_id == user_id)
+    return (await session.scalars(stmt)).first()
 
 
-async def delete_report(session: AsyncSession, report_id: int) -> bool:
-    report = await session.get(Report, report_id)
+async def delete_report(session: AsyncSession, report_id: int, user_id: int) -> bool:
+    report = await get_report(session, report_id, user_id)
     if report is None:
         return False
     await session.delete(report)

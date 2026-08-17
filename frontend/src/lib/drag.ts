@@ -12,6 +12,25 @@ export type DragPlan =
 const shift = (d: Date, minutes: number) => new Date(d.getTime() + minutes * 60000)
 
 /**
+ * How many day columns the pointer has landed away from the one it started in.
+ *
+ * Derived from where the pointer *is* relative to the origin column, not from how far
+ * it has travelled since the grab. Measuring travel meant the result depended on where
+ * inside the card the user happened to press: grabbing near a card's right edge and
+ * moving 70px — still visually within the same column — rounded to a whole day and
+ * moved the event, while grabbing near the left edge and dropping clearly over the
+ * next column could round to 0 and snap back.
+ *
+ * `floor` is what gives "the column under the cursor": staying inside the origin
+ * column keeps the ratio in [0, 1) -> 0, one column right lands in [1, 2) -> 1, and
+ * anywhere left of the origin goes negative -> -1 or beyond.
+ */
+export function dayColumnDelta(clientX: number, columnLeft: number, columnWidth: number): number {
+  if (columnWidth <= 0) return 0
+  return Math.floor((clientX - columnLeft) / columnWidth)
+}
+
+/**
  * Turn a pointer gesture into the request to send, or null when nothing changed.
  *
  * Pure on purpose: this is where snapping, day shifts and the minimum-duration clamp

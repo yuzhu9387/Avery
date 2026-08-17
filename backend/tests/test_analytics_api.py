@@ -85,9 +85,10 @@ async def test_evaluate_period_service_rejects_reversed_range_directly(client, s
     await _setup(client)
     from datetime import datetime
 
+    user_id = (await client.get("/api/auth/me")).json()["id"]
     with pytest.raises(evaluation_service.InvalidPeriod):
         await evaluation_service.evaluate_period(
-            session, datetime(2026, 9, 1), datetime(2026, 8, 1)
+            session, datetime(2026, 9, 1), datetime(2026, 8, 1), user_id
         )
 
 
