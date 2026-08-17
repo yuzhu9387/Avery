@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "avery": {
+      "command": "/absolute/path/to/avery/backend/.venv/bin/python",
+      "args": ["-m", "mcp_server"],
+      "cwd": "/absolute/path/to/avery/backend",
+      "env": {
+        "AVERY_BASE_URL": "http://127.0.0.1:8001",
+        "AVERY_AGENT_TOKEN": "issue one with POST /api/agent-tokens — see README"
+      }
+    }
+  }
+}
