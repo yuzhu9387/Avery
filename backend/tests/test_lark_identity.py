@@ -24,9 +24,11 @@ def _configured(monkeypatch):
 def test_lark_authorize_url_asks_for_the_email_scope():
     url = oauth_service.build_authorize_url("lark")
     q = parse_qs(urlparse(url).query)
-    assert q["scope"] == ["contact:user.email:readonly"], (
+    scope = q["scope"][0]
+    assert "contact:user.email:readonly" in scope, (
         "without this Lark returns no email and every sign-in needs the link step"
     )
+    assert "offline_access" in scope, "no refresh token is issued without it"
     assert q["app_id"] == ["cli_test"], "Lark spells the client id app_id"
 
 
@@ -87,6 +89,9 @@ def test_lark_calendar_authorize_url_asks_for_both_scopes():
     scope = unquote(q["scope"][0])
     assert "calendar:calendar:readonly" in scope
     assert "calendar:calendar" in scope, "write scope rides along for future write-back"
+    # Without this Lark issues no refresh token and the connection silently dies
+    # one access-token lifetime later.
+    assert "offline_access" in scope
     assert q["app_id"] == ["cli_test"]
     # Google-only knobs must not leak into Lark's URL.
     assert "access_type" not in q and "prompt" not in q

@@ -83,10 +83,14 @@ PROVIDERS: dict[str, dict] = {
         # falls through to the "type your address" step, and the account can never be
         # matched automatically. Lark DOES take a scope parameter, contrary to the
         # note that used to sit here.
-        "scope": "contact:user.email:readonly",
+        # `offline_access` is what makes Lark issue a refresh token at all. Without
+        # it the connection works for exactly one access-token lifetime and then
+        # dies with "no refresh token on file" — which is precisely how the first
+        # Lark calendar connection failed, silently, hours after it was made.
+        "scope": "contact:user.email:readonly offline_access",
         # Read now, write later: the write scope rides along so Lark write-back
         # will not need a second consent screen once it exists.
-        "calendar_scope": "calendar:calendar:readonly calendar:calendar",
+        "calendar_scope": "calendar:calendar:readonly calendar:calendar offline_access",
         "client_id_setting": "lark_app_id",
         "client_secret_setting": "lark_app_secret",
         "env_vars": ["LARK_APP_ID", "LARK_APP_SECRET"],
