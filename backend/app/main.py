@@ -2,9 +2,12 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.staticfiles import StaticFiles
 
 import app.models  # noqa: F401
 
+from app.config import FRONTEND_DIST_DIR
 from app.database import Base, engine
 from app.routers import agent_tokens as agent_tokens_router
 from app.routers import analytics as analytics_router
@@ -61,3 +64,32 @@ app.include_router(calendar_router.month_router)
 @app.get("/api/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+class _SPAStaticFiles(StaticFiles):
+    """Serve the built frontend, falling back to index.html for client-side routes.
+
+    A request for an unknown path (e.g. /events/3, refreshed directly) would
+    otherwise 404 instead of letting the React router handle it. /api/* paths
+    are excluded from the fallback — they should 404 normally, not resolve to
+    the SPA shell — but in practice a mismatched /api/* request never reaches
+    here at all: this is mounted at "/" after every /api router above, so
+    Starlette matches those routers first and only falls through to this
+    mount when nothing under /api/* (or elsewhere) claimed the path.
+    """
+
+    async def get_response(self, path: str, scope):
+        try:
+            return await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            if exc.status_code == 404 and path != "api" and not path.startswith("api/"):
+                return await super().get_response("index.html", scope)
+            raise
+
+
+# Mounted last and conditionally: in local dev frontend/dist doesn't exist
+# (Vite's dev server serves the UI on :5173 instead), so skip silently rather
+# than crashing at import. In a container image the Dockerfile has already
+# built the frontend to this path.
+if FRONTEND_DIST_DIR.is_dir():
+    app.mount("/", _SPAStaticFiles(directory=FRONTEND_DIST_DIR, html=True), name="frontend")

@@ -4,6 +4,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 PROJECT_DIR = BACKEND_DIR.parent
+# Vite's build output. Present in a container image (the Dockerfile copies the
+# built frontend here, as a sibling of backend/) and absent in local dev,
+# where Vite's own dev server serves the UI on :5173 instead.
+FRONTEND_DIST_DIR = PROJECT_DIR / "frontend" / "dist"
 
 
 class Settings(BaseSettings):
