@@ -81,6 +81,14 @@ export default function EventDetailPage() {
   const data = event.data
   const isDone = data.completed_at !== null
   const day = parseLocal(data.start_at)
+  // A routine occurrence is the weekly allocation the routine block generated, not
+  // an appointment of its own — editing it here would only ever touch this one
+  // occurrence, silently drifting from the block that is supposed to be the single
+  // source of truth. Every field below is rendered read-only for it; the actual
+  // edit path is the "Edit routine block" link, which changes every occurrence at
+  // once. `routine_block_id` is always set alongside this (see
+  // `services/routines.py`'s `materialize_week`), so the two checks agree.
+  const isRoutine = data.source === 'routine'
 
   // "Adjusting state during rendering" (a React-documented pattern): when the
   // loaded event changes, re-derive the time drafts from its data before this
@@ -113,6 +121,7 @@ export default function EventDetailPage() {
   // clears a stale banner the instant the user retries rather than leaving it up
   // while the new request is in flight.
   const toggleDone = () => {
+    if (isRoutine) return
     complete.reset()
     uncomplete.reset()
     if (isDone) uncomplete.mutate(id)
@@ -120,15 +129,20 @@ export default function EventDetailPage() {
   }
 
   const commitName = () => {
+    // Belt-and-suspenders: the input itself is `readOnly` for a routine event, so
+    // this should never see changed text, but a mutation guard costs nothing.
+    if (isRoutine) return
     const trimmed = displayName.trim()
     if (trimmed && trimmed !== data.title) saveName.mutate({ title: trimmed })
   }
 
   const commitNotes = () => {
+    if (isRoutine) return
     if (displayNotes !== data.notes) saveNotes.mutate({ notes: displayNotes })
   }
 
   const toggleTag = (tagId: number) => {
+    if (isRoutine) return
     const next = displayTagIds.includes(tagId)
       ? displayTagIds.filter((t) => t !== tagId)
       : [...displayTagIds, tagId]
@@ -157,13 +171,24 @@ export default function EventDetailPage() {
             e.currentTarget.blur()
           }
         }}
+        readOnly={isRoutine}
+        aria-readonly={isRoutine}
         aria-label="Event title"
         style={isDone ? { textDecoration: 'line-through' } : undefined}
-        className="mt-3 w-full border-none bg-transparent text-xl outline-none focus:ring-0"
+        className={`mt-3 w-full border-none bg-transparent text-xl outline-none focus:ring-0${isRoutine ? ' cursor-default' : ''}`}
       />
       {saveName.isError && (
         <p className="mt-1 text-xs" style={{ color: 'var(--over)' }}>
           {errorMessage(saveName.error)}
+        </p>
+      )}
+
+      {/* The one-line "why", per the requirement that a routine occurrence must
+       *  explain itself rather than just silently ignoring edits — every disabled
+       *  control below is inert, not broken, and this is the sentence that says so. */}
+      {isRoutine && (
+        <p className="mt-1 text-xs" style={{ color: 'var(--ink-muted)' }}>
+          Generated from your Routine — edit the block itself to change every occurrence.
         </p>
       )}
 
@@ -177,8 +202,9 @@ export default function EventDetailPage() {
             type="time"
             step={60}
             value={toTimeInput(startMinutes)}
-            className="rounded-[8px] px-2 py-1"
+            className="rounded-[8px] px-2 py-1 disabled:opacity-60"
             style={{ background: 'var(--surface)' }}
+            disabled={isRoutine}
             onChange={(e) => setStartMinutes(fromTimeInput(e.target.value))}
           />
           <span className="text-ink-faint">–</span>
@@ -186,19 +212,24 @@ export default function EventDetailPage() {
             type="time"
             step={60}
             value={toTimeInput(endMinutes)}
-            className="rounded-[8px] px-2 py-1"
+            className="rounded-[8px] px-2 py-1 disabled:opacity-60"
             style={{ background: 'var(--surface)' }}
+            disabled={isRoutine}
             onChange={(e) => setEndMinutes(fromTimeInput(e.target.value))}
           />
-          <button
-            type="button"
-            className="rounded-[8px] px-2 py-1 text-xs font-bold disabled:opacity-50"
-            style={{ background: 'var(--pale)' }}
-            disabled={saveTimes.isPending}
-            onClick={() => saveTimes.mutate(resolveDayTimeRange(day, startMinutes, endMinutes))}
-          >
-            {saveTimes.isPending ? 'Saving…' : 'Save'}
-          </button>
+          {/* No Save button for a routine occurrence: the inputs above are disabled,
+           *  so there is never anything for it to commit. */}
+          {!isRoutine && (
+            <button
+              type="button"
+              className="rounded-[8px] px-2 py-1 text-xs font-bold disabled:opacity-50"
+              style={{ background: 'var(--pale)' }}
+              disabled={saveTimes.isPending}
+              onClick={() => saveTimes.mutate(resolveDayTimeRange(day, startMinutes, endMinutes))}
+            >
+              {saveTimes.isPending ? 'Saving…' : 'Save'}
+            </button>
+          )}
         </dd>
         <dt className="text-ink-faint">Categories</dt>
         <dd>
@@ -210,7 +241,8 @@ export default function EventDetailPage() {
                   key={tag.id}
                   type="button"
                   onClick={() => toggleTag(tag.id)}
-                  className="rounded-full transition-opacity"
+                  disabled={isRoutine}
+                  className="rounded-full transition-opacity disabled:cursor-default"
                   style={{ opacity: active ? 1 : 0.4 }}
                 >
                   <TagChip tag={tag} size="xs" />
@@ -220,7 +252,7 @@ export default function EventDetailPage() {
             {tagsQuery.isSuccess && (tagsQuery.data ?? []).length === 0 && (
               <span className="text-xs text-ink-faint">No tags yet.</span>
             )}
-            {saveTagsDirty && (
+            {saveTagsDirty && !isRoutine && (
               <button
                 type="button"
                 className="rounded-[8px] px-2 py-1 text-xs font-bold disabled:opacity-50"
@@ -249,7 +281,9 @@ export default function EventDetailPage() {
             onChange={(e) => setNotesDraft(e.target.value)}
             onBlur={commitNotes}
             rows={3}
-            className="w-full rounded-[8px] px-2 py-1 text-sm"
+            readOnly={isRoutine}
+            aria-readonly={isRoutine}
+            className={`w-full rounded-[8px] px-2 py-1 text-sm${isRoutine ? ' cursor-default opacity-60' : ''}`}
             style={{ background: 'var(--surface)' }}
           />
           {saveNotes.isError && (
@@ -271,14 +305,19 @@ export default function EventDetailPage() {
        *  carry `ml-auto`, which pushed it to the far edge — a long way from the other
        *  control acting on the same event. */}
       <div className="mt-6 flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          className="rounded-[8px] px-3 py-1.5 text-sm font-bold"
-          style={{ background: 'var(--pale)' }}
-          onClick={toggleDone}
-        >
-          {isDone ? 'Mark not done' : 'Mark done'}
-        </button>
+        {/* Completion is a mutation like any other field above: a routine
+         *  occurrence doesn't own it, so the button that would fire it is gone
+         *  rather than present-but-disabled. */}
+        {!isRoutine && (
+          <button
+            type="button"
+            className="rounded-[8px] px-3 py-1.5 text-sm font-bold"
+            style={{ background: 'var(--pale)' }}
+            onClick={toggleDone}
+          >
+            {isDone ? 'Mark not done' : 'Mark done'}
+          </button>
+        )}
         <button
           type="button"
           className="rounded-[8px] px-3 py-1.5 text-sm transition-colors hover:bg-[var(--blush)]/40"
@@ -302,11 +341,19 @@ export default function EventDetailPage() {
          *  generated them does, and only the Routine page edits blocks. Passed as a
          *  `?block=<id>` query param on the route rather than router state, so the
          *  link works even if the Routine page is opened directly (a state object
-         *  would be lost on a hard navigation or reload). */}
+         *  would be lost on a hard navigation or reload). Styled as the primary
+         *  action (matching "Mark done"'s pale button, above) when this page is
+         *  read-only — it is the ONLY way to actually change anything from here,
+         *  so it needs to read as more than an ordinary muted nav link. */}
         {data.routine_block_id !== null && (
           <Link
             to={`/routine?block=${data.routine_block_id}`}
-            className="rounded-[8px] px-3 py-1.5 text-sm text-ink-muted transition-colors hover:bg-[var(--pale)]/50 hover:text-ink"
+            className={
+              isRoutine
+                ? 'rounded-[8px] px-3 py-1.5 text-sm font-bold'
+                : 'rounded-[8px] px-3 py-1.5 text-sm text-ink-muted transition-colors hover:bg-[var(--pale)]/50 hover:text-ink'
+            }
+            style={isRoutine ? { background: 'var(--pale)' } : undefined}
           >
             Edit routine block
           </Link>

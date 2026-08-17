@@ -119,7 +119,10 @@ export function EventCard({
 
   return (
     <div
-      className="absolute overflow-hidden text-left select-none"
+      // `calendar-card` is left off while dragging: the CSS hover rule it enables
+      // would otherwise fight the inline `zIndex: 20` / grabbing cursor set below
+      // for the card actually being moved — see index.css for what the class does.
+      className={`absolute overflow-hidden text-left select-none${isDragging ? '' : ' calendar-card'}`}
       style={{
         top: segment.topPx,
         height: segment.heightPx,
@@ -132,6 +135,10 @@ export function EventCard({
         zIndex: isDragging ? 20 : undefined,
         boxShadow: isDragging ? 'var(--shadow-card)' : undefined,
       }}
+      // The hover-expand affordance grows the card visually (see index.css), but a
+      // truncated title still needs to be reachable without a mouse — the native
+      // `title` tooltip (and its use as an accessible-name fallback) covers that.
+      title={title}
       onPointerDown={onPointerDown}
     >
       <div className="flex items-start gap-1 px-1.5 py-0.5">
@@ -168,7 +175,7 @@ export function EventCard({
           ))}
         <div className="min-w-0 flex-1">
           <div
-            className="truncate text-[11px] font-bold leading-tight"
+            className="calendar-card-title truncate text-[11px] font-bold leading-tight"
             style={isDone ? { textDecoration: 'line-through' } : undefined}
           >
             {title}

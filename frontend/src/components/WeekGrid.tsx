@@ -411,6 +411,7 @@ export function WeekGrid({
                   columnCount={segment.columnCount}
                   columnSpan={segment.columnSpan}
                   tagMap={tagMap}
+                  onOpen={onOpen}
                 />
               ))}
               {laidOutByDay[dayIndex].map(({ event, segment }) => {
@@ -499,12 +500,22 @@ export function bandColumnStyle(
 
 /** A routine block as the day's background: what this stretch of time is FOR, not a
  *  concrete appointment. Full width when nothing else at its time conflicts, tinted
- *  with its category colour, and `pointer-events-none` so every gesture — creating,
- *  dragging, completing — acts on the real events drawn over it. When another
- *  routine block overlaps it in time, the two split the column between them via
- *  `columnIndex`/`columnCount`/`columnSpan` — the same `layoutSegments` clustering
- *  the foreground events use, run as an independent pass over just the background
- *  layer so it never affects real events. */
+ *  with its category colour. It used to be `pointer-events-none` so every gesture —
+ *  creating, dragging, completing — fell through to the real events drawn over it,
+ *  but that also made a routine block with nothing on top of it unreachable: there
+ *  was no way to see what it even was. It now takes exactly one gesture of its
+ *  own — a click (or Enter/Space, since it's a real button for keyboard and screen
+ *  reader users) that opens the block's read-only detail page — and nothing else:
+ *  no drag, no resize, no completion toggle, because a routine occurrence is the
+ *  weekly allocation, not an appointment, and editing belongs on the Routine page
+ *  against the block itself. Deliberately NOT wired through `useCardGestures`
+ *  (the click/double-click/drag arbitrator real cards use): there is only one
+ *  gesture to arbitrate here, so a plain click handler is the whole story, and it
+ *  can't accidentally grow a drag or a toggle later without someone doing that on
+ *  purpose. When another routine block overlaps it in time, the two split the
+ *  column between them via `columnIndex`/`columnCount`/`columnSpan` — the same
+ *  `layoutSegments` clustering the foreground events use, run as an independent
+ *  pass over just the background layer so it never affects real events. */
 function RoutineBand({
   event,
   segment,
@@ -512,6 +523,7 @@ function RoutineBand({
   columnCount,
   columnSpan,
   tagMap,
+  onOpen,
 }: {
   event: AveryEvent
   segment: Segment
@@ -523,16 +535,23 @@ function RoutineBand({
    *  actually draws across — see `layoutSegments` in `lib/overlap.ts`. */
   columnSpan: number
   tagMap: Map<number, Tag>
+  /** Opens the block's (read-only) detail page. Reuses the same prop the real
+   *  cards open through, so both land on the same route. */
+  onOpen: (event: AveryEvent) => void
 }) {
   const tag = tagMap.get(event.tag_ids[0])
   const color = tag?.color ?? 'var(--pale)'
   const bandStyle = bandColumnStyle(columnIndex, columnCount, columnSpan)
   return (
     <div
+      role="button"
+      tabIndex={0}
+      // `calendar-card` is the hover/focus-expand affordance shared with the real
+      // event cards — see index.css. Bands have no drag state to protect it from.
       className={
         columnCount <= 1
-          ? 'pointer-events-none absolute inset-x-0'
-          : 'pointer-events-none absolute'
+          ? 'calendar-card absolute inset-x-0 cursor-pointer'
+          : 'calendar-card absolute cursor-pointer'
       }
       style={{
         top: segment.topPx,
@@ -544,7 +563,22 @@ function RoutineBand({
         background: tint(color, 0.16),
         borderLeft: `2px solid ${tint(color, 0.45)}`,
       }}
-      title={`${event.title} · routine`}
+      title={`${event.title} · from your Routine — click to view (edit on the Routine page)`}
+      aria-label={`${event.title}, routine block, view details`}
+      // The day column underneath listens for `onPointerDown` to open the
+      // quick-create popover for empty time (see `onEmptyClick` below) — without
+      // stopping propagation here, pressing the band would open that popover on
+      // pointerdown and then navigate away under it on click, one gesture doing
+      // two contradictory things. GridCard's wrapper stops the same event for the
+      // same reason.
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={() => onOpen(event)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onOpen(event)
+        }
+      }}
     >
       {segment.heightPx > 18 && (
         // The band itself sits at 0.16 opacity, so the label must NOT inherit that
@@ -556,7 +590,7 @@ function RoutineBand({
             className="h-1.5 w-1.5 shrink-0 rounded-full"
             style={{ background: color }}
           />
-          <span className="truncate text-[10px] font-medium uppercase tracking-wide text-ink-muted">
+          <span className="calendar-card-title truncate text-[10px] font-medium uppercase tracking-wide text-ink-muted">
             {event.title}
           </span>
         </div>
