@@ -100,3 +100,17 @@ async def _no_ambient_oauth_credentials():
     yield
     for name, value in saved.items():
         setattr(app_settings, name, value)
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _no_ambient_jobs_token():
+    """Blank JOBS_TOKEN for every test, same reasoning as the OAuth fixture
+    above: `Settings` reads `backend/.env`, which is gitignored and differs
+    per machine. A developer who has set JOBS_TOKEN locally must not make the
+    "missing token -> 503" test start failing. Tests that need a token set it
+    explicitly via monkeypatch.
+    """
+    saved = app_settings.jobs_token
+    app_settings.jobs_token = ""
+    yield
+    app_settings.jobs_token = saved
