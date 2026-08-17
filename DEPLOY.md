@@ -96,68 +96,21 @@ update avery --set-env-vars=OAUTH_REDIRECT_BASE=...`) once you know it — or
 set up a custom domain first and use that from the start so it never has to
 change.
 
-**⚠️ First deploy only — the migration bootstrap problem.** Read this before
-your very first deploy against a brand-new, empty Cloud SQL database; it does
-not apply to any deploy after the first.
-
-## 4. First-deploy bootstrap (empty database only)
-
 `docker-entrypoint.sh` runs `alembic upgrade head` before starting the
-server. One migration in the chain, `0251ebefc744_require_user_id`, refuses
-to run unless at least one row exists in `users` — its job is enforcing
-`user_id NOT NULL` on every user-scoped table, and it needs a real user to
-attach any legacy orphaned rows to before doing so. On a genuinely empty
-database there is no such user yet, and the migration deliberately raises
-rather than guessing (see the migration's docstring). **This means a
-container can never start cleanly against a brand-new Cloud SQL database as
-committed today** — the entrypoint's `alembic upgrade head` fails, the
-revision never becomes healthy, and Cloud Run has no live instance to take
-the signup request that would create the first user. This is a real gap, not
-a Postgres-portability issue (it reproduces identically against a fresh
-SQLite file) — it was out of scope for the Postgres-support work here to fix
-by loosening a data-safety guard, so it's called out here instead of bodged.
+server, so the very first deploy against a brand-new, empty Cloud SQL
+database applies the entire migration chain — including
+`0251ebefc744_require_user_id`, which enforces `user_id NOT NULL` on every
+user-scoped table — with no existing account and no manual bootstrap step.
+That migration only requires a user to exist when there's orphaned legacy
+data (a NULL `user_id` row) that needs attaching to one; a fresh, empty
+database has nothing to backfill, so it applies the constraint immediately
+and the container reaches a healthy state on the first try. (See the
+migration's docstring for the full three-way guard: empty database, no user
+needed; NULL rows with a user present, backfilled as before; NULL rows with
+no user, still refuses to guess.) Just sign up through the deployed UI once
+the service is live to create the first account.
 
-Work around it once, on the very first deploy against a fresh database:
-
-```bash
-# 1. Deploy with the entrypoint overridden to stop one revision short —
-#    schema created, but before user_id is made NOT NULL. Everything else
-#    (all 14 other revisions) runs and the app is fully usable at this point.
-gcloud run deploy avery \
-  --source=. \
-  --region=REGION \
-  --command=alembic --args=upgrade,c9d2e85b3a11 \
-  --add-cloudsql-instances=PROJECT_ID:REGION:avery-db \
-  --set-secrets=DATABASE_URL=avery-database-url:latest \
-  --execute-now   # or: run as a Cloud Run Job instead of a service revision
-
-# 2. Deploy the real service normally (the command in step 3 above, no
-#    --command override) so it's live and taking traffic.
-
-# 3. Create the first account through the running app:
-curl -X POST https://YOUR-SERVICE-URL/api/auth/signup \
-  -H 'content-type: application/json' \
-  -d '{"email":"you@example.com","name":"You","password":"..."}'
-
-# 4. Finish the migration, now that a user exists:
-gcloud run jobs execute avery-migrate \
-  --image=IMAGE_URL --command=alembic --args=upgrade,head \
-  # or run `alembic upgrade head` locally via the Cloud SQL Auth Proxy
-
-# 5. Every deploy from now on is just `gcloud run deploy` as in step 3 —
-#    `alembic upgrade head` on startup is a no-op once the database is
-#    already current.
-```
-
-If you'd rather not do this dance: the cleanest permanent fix is loosening
-`0251ebefc744`'s guard to check "are there any NULL `user_id` rows across the
-partitioned tables" instead of "does any user exist at all" — a fresh,
-all-empty database has nothing to backfill and could apply the `NOT NULL`
-constraint immediately with no user required. That's a real code change
-(business logic, not portability) and wasn't made here; flagging it as the
-recommended follow-up rather than making it silently.
-
-## 5. Wire up GitHub continuous deployment
+## 4. Wire up GitHub continuous deployment
 
 In the Cloud Console: **Cloud Run → avery → Edit & Deploy New Revision →
 Continuously deploy from a repository → Set up with Cloud Build**. Point it
@@ -168,7 +121,7 @@ trigger's generated `cloudbuild.yaml` / Cloud Run service config carries
 those forward from the current revision; check they're still present after
 setting the trigger up once, since some flows reset them to defaults.
 
-## 6. Update OAuth redirect URIs
+## 5. Update OAuth redirect URIs
 
 Once the service has a stable URL (or custom domain), register the exact
 callback URL in each provider's console — this only needs doing once, or
@@ -185,10 +138,10 @@ again if the URL changes:
 in the first place — this step just updates the redirect URI to the deployed
 URL instead of `localhost:5173`.)
 
-## 7. Seed data
+## 6. Seed data
 
-Once you have an account (step 4.3, or by signing up through the deployed
-UI), seed the default tags/rules/routine as that user:
+Once you have an account (by signing up through the deployed UI), seed the
+default tags/rules/routine as that user:
 
 ```bash
 # Sign in first to get a session cookie, then:
