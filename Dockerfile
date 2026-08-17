@@ -46,6 +46,16 @@ ENV PORT=8080
 # unaffected since that default lives in code, not this image. See DEPLOY.md
 # for the Cloud Scheduler replacement.
 ENV ENABLE_SCHEDULER=false
+# Avery stores and compares naive local datetimes throughout -- `date.today()`
+# picks the day a week rolls into, `datetime.now()` stamps every reminder sweep.
+# A container defaults to UTC, so without this the app silently treats UTC as
+# local: evening events land on the following day, and the Sunday roll fires on
+# Saturday afternoon Pacific. Baked into the image rather than left as a Cloud
+# Run env var so a fresh deploy from DEPLOY.md cannot miss it and a stray
+# `--set-env-vars` (which replaces the whole set) cannot drop it.
+# `python:3.12-slim` ships tzdata, so this resolves rather than falling back to
+# UTC -- verified: TZ=America/Los_Angeles gives time.tzname ('PST', 'PDT').
+ENV TZ=America/Los_Angeles
 
 EXPOSE 8080
 

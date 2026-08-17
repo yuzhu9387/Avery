@@ -200,11 +200,36 @@ and add it to the deploy command's `--set-secrets`:
 --set-secrets=...,JOBS_TOKEN=avery-jobs-token:latest
 ```
 
+### The container's timezone
+
+Avery stores and compares **naive local** datetimes everywhere — `date.today()`
+chooses the day a week rolls into, `datetime.now()` stamps each reminder sweep,
+and events carry no offset. A container defaults to UTC, so an image without a
+timezone silently treats UTC as local: evening events land on the following
+day, and a Sunday-20:00 roll fires Saturday afternoon Pacific.
+
+`Dockerfile` therefore sets it:
+
+```
+ENV TZ=America/Los_Angeles
+```
+
+It lives in the image, not in `--set-env-vars`, for two reasons: a fresh deploy
+following this runbook gets it without a step to forget, and `--set-env-vars`
+*replaces* the whole variable set, so a later unrelated env change can't quietly
+drop it. Use `--update-env-vars` when changing one variable, and if you do
+override `TZ` on the service, that value wins over the image's.
+
+Change the zone here **and** in the two Cloud Scheduler jobs below — they are
+separate clocks, and a mismatch between them is exactly the kind of bug that
+only shows up one hour a year, at a DST boundary.
+
 ### Create the two Cloud Scheduler jobs
 
 Same cadence the in-process scheduler used to run
 (`CronTrigger(day_of_week="sun", hour=WEEK_ROLL_HOUR)` for the roll, `*/15`
-for the sweep) — adjust the timezone and hour to match `WEEK_ROLL_HOUR`:
+for the sweep) — adjust the timezone and hour to match `WEEK_ROLL_HOUR`
+**and the image's `TZ`**:
 
 ```bash
 JOBS_TOKEN=$(gcloud secrets versions access latest --secret=avery-jobs-token)
