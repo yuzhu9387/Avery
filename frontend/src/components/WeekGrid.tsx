@@ -4,6 +4,7 @@ import type { AveryEvent, Tag } from '../api/types'
 import type { DragDraft } from '../hooks/useEventDrag'
 import type { GestureOrigin } from '../hooks/useCardGestures'
 import { useCardGestures } from '../hooks/useCardGestures'
+import { tint } from '../lib/color'
 import { addDays, formatDate, parseLocal } from '../lib/datetime'
 import {
   GRID,
@@ -204,11 +205,32 @@ export function WeekGrid({
   })()
   const showNowLine = todayIndex >= 0 && nowMinutes >= 0 && nowMinutes <= GRID_MINUTES
 
+  // Routine blocks are the allocation, not appointments: they render as full-width
+  // background bands and stay OUT of the overlap layout, so a real event placed on
+  // top of "Work" does not split into columns against it — the band is the ground
+  // the day is drawn on, the events are what actually happened.
+  const backgroundByDay: { event: AveryEvent; segment: Segment }[][] = Array.from(
+    { length: 7 },
+    () => [],
+  )
   const segmentsByDay: { event: AveryEvent; segment: Segment }[][] = Array.from(
     { length: 7 },
     () => [],
   )
+  const allDayByDay: AveryEvent[][] = Array.from({ length: 7 }, () => [])
   for (const event of events) {
+    if (event.all_day) {
+      // A day marker, not allocated time: pin it as a banner instead of a block —
+      // rendered as a 24h pillar it swallows the column and buries the day.
+      const dayIndex = Math.round(
+        (parseLocal(event.start_at).setHours(0, 0, 0, 0) -
+          new Date(weekStart).setHours(0, 0, 0, 0)) /
+          86_400_000,
+      )
+      if (dayIndex >= 0 && dayIndex < 7) allDayByDay[dayIndex].push(event)
+      continue
+    }
+    const target = event.source === 'routine' ? backgroundByDay : segmentsByDay
     const segments = segmentsForEvent(
       parseLocal(event.start_at),
       parseLocal(event.end_at),
@@ -216,7 +238,7 @@ export function WeekGrid({
       pxPerHour,
     )
     for (const segment of segments) {
-      segmentsByDay[segment.dayIndex].push({ event, segment })
+      target[segment.dayIndex].push({ event, segment })
     }
   }
 
@@ -224,12 +246,25 @@ export function WeekGrid({
   // Tuesday's columns. `layoutSegments` returns its results in the same order
   // it was given them, so this zips back onto `event` positionally rather than
   // by any id.
+
   const laidOutByDay: { event: AveryEvent; segment: LaidOutSegment }[][] = segmentsByDay.map(
     (dayEntries) => {
       const laidOut = layoutSegments(dayEntries.map((entry) => entry.segment))
       return dayEntries.map((entry, i) => ({ event: entry.event, segment: laidOut[i] }))
     },
   )
+
+  // Routine bands share the ground layer with each other the same way real events
+  // share the foreground: a second, independent `layoutSegments` pass over just the
+  // background segments. This never touches `segmentsByDay`/`laidOutByDay` above, so
+  // a real event laid on top of a routine block still renders full-span — only two
+  // routine blocks overlapping *each other* now split width instead of drawing on
+  // top of one another.
+  const laidOutBackgroundByDay: { event: AveryEvent; segment: LaidOutSegment }[][] =
+    backgroundByDay.map((dayEntries) => {
+      const laidOut = layoutSegments(dayEntries.map((entry) => entry.segment))
+      return dayEntries.map((entry, i) => ({ event: entry.event, segment: laidOut[i] }))
+    })
 
   const heightPx = gridHeightPx(pxPerHour)
 
@@ -276,6 +311,27 @@ export function WeekGrid({
               >
                 {d.getDate()}
               </div>
+              {/* Day markers (all-day externals) live in the header: pinned to the
+               *  day itself rather than to midnight, which the grid scrolls past. */}
+              {allDayByDay[i].map((event) => (
+                <button
+                  key={`allday-${event.id}`}
+                  type="button"
+                  onClick={() => onOpen(event)}
+                  className="mt-0.5 block w-full truncate rounded-[4px] px-1 text-left text-[9px] font-medium leading-[14px] text-white"
+                  style={{
+                    background:
+                      event.source === 'google'
+                        ? 'var(--external-google)'
+                        : event.source === 'lark'
+                          ? 'var(--external-lark)'
+                          : 'var(--line-strong)',
+                  }}
+                  title={`${event.title} · all day`}
+                >
+                  {event.title}
+                </button>
+              ))}
             </div>
           )
         })}
@@ -300,6 +356,12 @@ export function WeekGrid({
           return (
             <div
               key={dayIndex}
+              // Read by `useEventDrag` to size a day column while dragging. Marked
+              // explicitly because the card is not a direct child: it sits inside a
+              // `display: contents` wrapper, which generates no box at all, so
+              // measuring `parentElement` yielded a zero-width column and silently
+              // pinned every cross-day drag to zero days.
+              data-day-column={dayIndex}
               className="relative border-l border-line"
               style={{ height: heightPx }}
               onPointerDown={(e) => {
@@ -340,6 +402,17 @@ export function WeekGrid({
                   }}
                 />
               )}
+              {laidOutBackgroundByDay[dayIndex].map(({ event, segment }, i) => (
+                <RoutineBand
+                  key={`bg-${event.id}-${i}`}
+                  event={event}
+                  segment={segment}
+                  columnIndex={segment.columnIndex}
+                  columnCount={segment.columnCount}
+                  columnSpan={segment.columnSpan}
+                  tagMap={tagMap}
+                />
+              ))}
               {laidOutByDay[dayIndex].map(({ event, segment }) => {
                 const isDragging = draft?.eventId === event.id
                 let renderSegment: LaidOutSegment = segment
@@ -381,6 +454,113 @@ export function WeekGrid({
           )
         })}
       </div>
+    </div>
+  )
+}
+
+
+/** Horizontal breathing room between two side-by-side overlapping routine bands, so
+ *  two read as two rather than one wide one — the background-layer counterpart of
+ *  `CARD_GAP_PX` in `EventCard.tsx`. */
+const BAND_GAP_PX = 3
+
+/**
+ * Horizontal placement for a routine band occupying `columnSpan` of `columnCount`
+ * equal slots, mirroring `cardColumnStyle` in `EventCard.tsx` — same algebra, but
+ * for a band whose *outer* edges have no inset at all (a lone band runs edge to
+ * edge in the day column via the plain `inset-x-0` class), instead of the card's
+ * left inset and right gutter. Splitting only ever eats into the band's own span,
+ * never that outer edge.
+ *
+ * At `columnCount` 1 this returns `{}`, so the caller keeps using the bare
+ * `inset-x-0` class it always has — a day with no routine overlaps renders
+ * byte-identical to before this feature existed.
+ */
+export function bandColumnStyle(
+  columnIndex: number,
+  columnCount: number,
+  columnSpan: number,
+): { left?: string; width?: string } {
+  if (columnCount <= 1) return {}
+
+  const fixedPx = (columnCount - 1) * BAND_GAP_PX
+  const slotWidthPxOffset = fixedPx / columnCount
+  const leftPercent = (columnIndex / columnCount) * 100
+  const leftPxOffset = columnIndex * (BAND_GAP_PX - slotWidthPxOffset)
+
+  const widthPercent = (100 / columnCount) * columnSpan
+  const widthPxOffset = slotWidthPxOffset * columnSpan - (columnSpan - 1) * BAND_GAP_PX
+
+  return {
+    left: `calc(${leftPercent}% + ${leftPxOffset}px)`,
+    width: `calc(${widthPercent}% - ${widthPxOffset}px)`,
+  }
+}
+
+/** A routine block as the day's background: what this stretch of time is FOR, not a
+ *  concrete appointment. Full width when nothing else at its time conflicts, tinted
+ *  with its category colour, and `pointer-events-none` so every gesture — creating,
+ *  dragging, completing — acts on the real events drawn over it. When another
+ *  routine block overlaps it in time, the two split the column between them via
+ *  `columnIndex`/`columnCount`/`columnSpan` — the same `layoutSegments` clustering
+ *  the foreground events use, run as an independent pass over just the background
+ *  layer so it never affects real events. */
+function RoutineBand({
+  event,
+  segment,
+  columnIndex,
+  columnCount,
+  columnSpan,
+  tagMap,
+}: {
+  event: AveryEvent
+  segment: Segment
+  /** Which of `columnCount` side-by-side slots this band sits in, when it
+   *  overlaps another routine block in time. */
+  columnIndex: number
+  columnCount: number
+  /** How many of `columnCount` slots, starting at `columnIndex`, this band
+   *  actually draws across — see `layoutSegments` in `lib/overlap.ts`. */
+  columnSpan: number
+  tagMap: Map<number, Tag>
+}) {
+  const tag = tagMap.get(event.tag_ids[0])
+  const color = tag?.color ?? 'var(--pale)'
+  const bandStyle = bandColumnStyle(columnIndex, columnCount, columnSpan)
+  return (
+    <div
+      className={
+        columnCount <= 1
+          ? 'pointer-events-none absolute inset-x-0'
+          : 'pointer-events-none absolute'
+      }
+      style={{
+        top: segment.topPx,
+        height: segment.heightPx,
+        ...bandStyle,
+        // Alpha on the BACKGROUND, not `opacity` on the div: container opacity
+        // multiplies onto every child, which is exactly how the name label became
+        // invisible — 16% of ink is nothing.
+        background: tint(color, 0.16),
+        borderLeft: `2px solid ${tint(color, 0.45)}`,
+      }}
+      title={`${event.title} · routine`}
+    >
+      {segment.heightPx > 18 && (
+        // The band itself sits at 0.16 opacity, so the label must NOT inherit that
+        // wash: it renders in the app ink with the tag colour as a leading dot,
+        // which stays readable on any band colour.
+        <div className="flex items-center gap-1 px-1.5 pt-0.5">
+          <span
+            aria-hidden
+            className="h-1.5 w-1.5 shrink-0 rounded-full"
+            style={{ background: color }}
+          />
+          <span className="truncate text-[10px] font-medium uppercase tracking-wide text-ink-muted">
+            {event.title}
+          </span>
+        </div>
+      )}
     </div>
   )
 }
