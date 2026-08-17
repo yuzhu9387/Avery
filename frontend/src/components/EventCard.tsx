@@ -119,10 +119,7 @@ export function EventCard({
 
   return (
     <div
-      // `calendar-card` is left off while dragging: the CSS hover rule it enables
-      // would otherwise fight the inline `zIndex: 20` / grabbing cursor set below
-      // for the card actually being moved — see index.css for what the class does.
-      className={`absolute overflow-hidden text-left select-none${isDragging ? '' : ' calendar-card'}`}
+      className="absolute overflow-hidden text-left select-none"
       style={{
         top: segment.topPx,
         height: segment.heightPx,
@@ -135,8 +132,9 @@ export function EventCard({
         zIndex: isDragging ? 20 : undefined,
         boxShadow: isDragging ? 'var(--shadow-card)' : undefined,
       }}
-      // The hover-expand affordance grows the card visually (see index.css), but a
-      // truncated title still needs to be reachable without a mouse — the native
+      // The title wraps within the card's own width instead (see the
+      // `calendar-card-title` class below), but a caption clipped by the card's
+      // fixed height still needs to be reachable without a mouse — the native
       // `title` tooltip (and its use as an accessible-name fallback) covers that.
       title={title}
       onPointerDown={onPointerDown}
@@ -175,7 +173,17 @@ export function EventCard({
           ))}
         <div className="min-w-0 flex-1">
           <div
-            className="calendar-card-title truncate text-[11px] font-bold leading-tight"
+            // Wraps within the card's own width — never `truncate` — so a long
+            // name reads across multiple lines instead of drawing outside the
+            // card box. `break-words` lets an unbroken run (a long word, or a
+            // URL with no spaces) break mid-string once it can't fit a line on
+            // its own, which matters in a narrow overlap column that can be as
+            // little as ~30px wide; CJK text already has a break opportunity
+            // between every character, so it wraps without any extra rule. The
+            // outer card is `overflow-hidden` at a fixed `height` (this card's
+            // own time slot), so if the wrapped title still doesn't fit it clips
+            // vertically instead of growing the card or reflowing the grid.
+            className="calendar-card-title break-words text-[11px] font-bold leading-tight"
             style={isDone ? { textDecoration: 'line-through' } : undefined}
           >
             {title}

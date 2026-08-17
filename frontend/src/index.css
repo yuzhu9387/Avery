@@ -31,31 +31,10 @@ body {
 
 h1, h2, h3 { font-family: var(--font-display); font-weight: 600; letter-spacing: -0.01em; }
 
-/* Calendar cards — week-grid event cards and routine bands — truncate their
- * titles to fit a slot that can be as narrow as ~30px in a busy overlap column.
- * Hovering (or focusing, for keyboard users landing on a card that is itself
- * focusable) reveals the full name by growing the card to fit its content and
- * lifting it above its neighbours, rather than resizing anything in flow: every
- * card here is `position: absolute`, and its siblings get their position from
- * independent math in `lib/overlap.ts` / `WeekGrid.tsx`, not from this box's own
- * size — so growing one card on hover can only ever overlap its neighbours, never
- * push them. `!important` is only there to out-rank the per-render inline
- * `width`/`left` these components compute for the resting layout; nothing else on
- * the page uses `!important`, so this can't fight anything but itself.
- *
- * This is pure CSS — no pointer/JS state — so it can never swallow the pointer
- * events the drag/click gesture handlers on the same element depend on. */
-.calendar-card:hover,
-.calendar-card:focus-visible {
-  width: max-content !important;
-  max-width: min(22rem, calc(100vw - 2rem));
-  overflow: visible !important;
-  z-index: 25 !important;
-  box-shadow: var(--shadow-card);
-}
-.calendar-card:hover .calendar-card-title,
-.calendar-card:focus-visible .calendar-card-title {
-  overflow: visible;
-  text-overflow: clip;
-  white-space: nowrap;
-}
+/* Calendar cards — week-grid event cards and routine bands — wrap their titles
+ * within the card's own width instead of truncating to one line (`break-words`
+ * on `.calendar-card-title`, set in EventCard.tsx/WeekGrid.tsx). The card itself
+ * stays `overflow-hidden` at its resting, per-render `height`/`width` — a slot
+ * can be as narrow as ~30px in a busy overlap column — so a title that still
+ * doesn't fit after wrapping clips vertically instead of growing the card,
+ * pushing neighbours, or drawing outside the card's own box. */
