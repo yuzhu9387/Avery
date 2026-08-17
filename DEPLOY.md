@@ -154,30 +154,103 @@ unauthenticated bootstrap path here either.
 
 ---
 
-## What's not solved: the scheduler
+## 7. The scheduler: Cloud Scheduler + HTTP job endpoints
 
 `ENABLE_SCHEDULER` defaults to `false` in the container image (see
-`Dockerfile`). Cloud Run scales to zero and may run multiple instances of the
-same revision concurrently; an in-process APScheduler job (the weekly
-routine roll, the reminder sweep) would then fire zero times (nothing
-running when the cron tick happens) or N times (N instances all firing at
-once), neither of which is the once-only semantics the job needs.
+`Dockerfile`) and stays that way in production. Cloud Run scales to zero and
+may run multiple instances of the same revision concurrently, so an
+in-process APScheduler job (the weekly routine roll, the reminder sweep)
+would fire zero times (nothing running when the cron tick happens) or N
+times (N instances all firing at once), never the once-only semantics the
+job needs. Locally, `ENABLE_SCHEDULER` still defaults to `true` — APScheduler
+keeps working for anyone running Avery on their laptop without any of this.
 
-The correct replacement — **not built as part of this work** — is:
+In the deployed environment, `app/routers/jobs.py` exposes the same two job
+functions over HTTP instead, and **Cloud Scheduler** calls them directly:
 
-1. Add an internal HTTP endpoint (e.g. `POST /api/internal/week-roll`) that
-   runs `roll_next_week` / `sweep_reminders` from `app/scheduler/jobs.py`
-   directly, guarded so it isn't publicly callable (a shared secret header,
-   or restricting ingress and using OIDC-authenticated
-   Cloud-Scheduler-to-Cloud-Run invocation).
-2. Create a **Cloud Scheduler** job that HTTP-POSTs to that endpoint on the
-   same cron schedule the in-process job used
-   (`CronTrigger(day_of_week="sun", hour=WEEK_ROLL_HOUR)` for the roll,
-   `*/15` for the reminder sweep).
+- `POST /api/jobs/roll-week` → `roll_next_week`
+- `POST /api/jobs/sweep-reminders` → the reminder sweep
 
-Until that exists, the weekly roll and reminder sweep simply don't run in
-the deployed environment — local dev (where `ENABLE_SCHEDULER` still
-defaults to `true`) is unaffected.
+Both endpoints are idempotent (materialize_week skips any day that already
+has an event; the reminder sweep only ever selects `sent_at IS NULL` rows),
+so a Cloud Scheduler retry or an overlapping run is harmless. Both accept an
+optional date/time override in the JSON body (`{"today": "..."}`,
+`{"now": "..."}`) for replaying a specific run; Cloud Scheduler's normal
+calls should send `{}` and let the endpoint use the real clock.
+
+### Auth: a shared secret, checked in constant time
+
+These endpoints mutate every user's data and run with no user attached to
+the request, so they sit behind a dedicated secret — `JOBS_TOKEN` — instead
+of the normal cookie/agent-token auth. The caller sends it as the
+`X-Jobs-Token` header; `app/deps.py`'s `verify_jobs_token` compares it with
+`hmac.compare_digest`. If `JOBS_TOKEN` is unset, both endpoints return **503**
+and never call the job function — "no token configured" must never silently
+mean "no auth required".
+
+Store it in Secret Manager like the other secrets:
+
+```bash
+echo -n "$(openssl rand -base64 32)" | gcloud secrets create avery-jobs-token --data-file=-
+```
+
+and add it to the deploy command's `--set-secrets`:
+
+```bash
+--set-secrets=...,JOBS_TOKEN=avery-jobs-token:latest
+```
+
+### Create the two Cloud Scheduler jobs
+
+Same cadence the in-process scheduler used to run
+(`CronTrigger(day_of_week="sun", hour=WEEK_ROLL_HOUR)` for the roll, `*/15`
+for the sweep) — adjust the timezone and hour to match `WEEK_ROLL_HOUR`:
+
+```bash
+JOBS_TOKEN=$(gcloud secrets versions access latest --secret=avery-jobs-token)
+SERVICE_URL=https://YOUR-SERVICE-URL
+
+gcloud scheduler jobs create http avery-roll-week \
+  --schedule="0 20 * * 0" \
+  --time-zone="America/Los_Angeles" \
+  --uri="$SERVICE_URL/api/jobs/roll-week" \
+  --http-method=POST \
+  --headers="X-Jobs-Token=$JOBS_TOKEN,Content-Type=application/json" \
+  --message-body="{}"
+
+gcloud scheduler jobs create http avery-sweep-reminders \
+  --schedule="*/15 * * * *" \
+  --time-zone="America/Los_Angeles" \
+  --uri="$SERVICE_URL/api/jobs/sweep-reminders" \
+  --http-method=POST \
+  --headers="X-Jobs-Token=$JOBS_TOKEN,Content-Type=application/json" \
+  --message-body="{}"
+```
+
+Don't put `$JOBS_TOKEN` in shell history that gets committed anywhere — pull
+it fresh from Secret Manager as above rather than pasting the literal value.
+
+### Stronger alternative: OIDC instead of a shared secret
+
+The shared secret above is what's needed because step 3 deploys with
+`--allow-unauthenticated`, so the endpoints are reachable by anyone who has
+the URL and must gate themselves. If the service is instead made private
+(drop `--allow-unauthenticated`, restrict ingress), Cloud Scheduler's HTTP
+target can authenticate with an **OIDC identity token** instead
+(`--oidc-service-account-email=...`), verified by Cloud Run's platform layer
+before the request reaches the app at all — no header, no app-level secret
+to rotate or leak. That's a stronger setup but means the whole service (not
+just `/api/jobs/*`) stops being publicly reachable, which is a bigger change
+than this task made; noting it here as the natural next step rather than
+building it now.
+
+### What's still not addressed
+
+Reminder *delivery* (actually notifying the user — Lark, push, etc.) is
+still a stub; `sweep_reminders` only marks reminders sent, per its own
+docstring ("Lark delivery is wired in during Plan 3"). Wiring up Cloud
+Scheduler makes the sweep run on a real cadence in production; it doesn't by
+itself make the sweep do anything more than it already did.
 
 ## Rough monthly cost
 
