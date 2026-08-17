@@ -19,11 +19,18 @@ e4b0d9a51c77) rather than hardcoded, and the migration refuses to guess if no
 user exists at all: silently defaulting would attach someone's data to nobody,
 which is worse than failing the migration.
 
-batch_alter_table(recreate="always") is required, not cosmetic: SQLite cannot
-ALTER a column's nullability in place, so Alembic rebuilds each table, and
-`recreate="always"` is what carries the `fk_<table>_user_id_users` ON DELETE
-CASCADE constraint across the rebuild (see bfa9f753810b for the same pattern
-on events.task_id).
+batch_alter_table(recreate="always") is required on SQLite, not cosmetic:
+SQLite cannot ALTER a column's nullability in place, so Alembic rebuilds each
+table, and `recreate="always"` is what carries the `fk_<table>_user_id_users`
+ON DELETE CASCADE constraint across the rebuild (see bfa9f753810b for the
+same pattern on events.task_id). Postgres, by contrast, supports
+`ALTER COLUMN ... SET NOT NULL` in place and must NOT be forced through
+recreate="always": that forces a full table rebuild (drop + recreate the
+primary key) even though the PK isn't changing, which Postgres refuses on
+`tasks` because `reminders.task_id` and `events.task_id` still reference it
+(dropping tasks_pkey to rebuild would require CASCADE). So recreate mode is
+chosen per-dialect below: "always" only on SQLite, the native in-place ALTER
+everywhere else.
 
 Revision ID: 0251ebefc744
 Revises: c9d2e85b3a11
@@ -43,6 +50,12 @@ depends_on = None
 PARTITIONED_TABLES = ("tasks", "events", "tags", "rules", "routines", "reports", "reminders")
 
 
+def _recreate_kwargs(bind) -> dict:
+    # Only SQLite needs (or tolerates) a forced full-table rebuild here; see
+    # the module docstring for why forcing it on Postgres breaks.
+    return {"recreate": "always"} if bind.dialect.name == "sqlite" else {}
+
+
 def upgrade() -> None:
     bind = op.get_bind()
 
@@ -54,16 +67,19 @@ def upgrade() -> None:
             "would silently hand someone's data to nobody."
         )
 
+    recreate_kwargs = _recreate_kwargs(bind)
     for table in PARTITIONED_TABLES:
         bind.execute(
             sa.text(f"UPDATE {table} SET user_id = :uid WHERE user_id IS NULL"),
             {"uid": target_user_id},
         )
-        with op.batch_alter_table(table, recreate="always") as batch:
+        with op.batch_alter_table(table, **recreate_kwargs) as batch:
             batch.alter_column("user_id", existing_type=sa.Integer(), nullable=False)
 
 
 def downgrade() -> None:
+    bind = op.get_bind()
+    recreate_kwargs = _recreate_kwargs(bind)
     for table in reversed(PARTITIONED_TABLES):
-        with op.batch_alter_table(table, recreate="always") as batch:
+        with op.batch_alter_table(table, **recreate_kwargs) as batch:
             batch.alter_column("user_id", existing_type=sa.Integer(), nullable=True)

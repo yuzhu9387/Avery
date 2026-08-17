@@ -74,14 +74,36 @@ def upgrade() -> None:
         _add_user_id(table)
 
     # tags: global UNIQUE(name) -> UNIQUE(user_id, name)
+    #
+    # The constraint being dropped was created unnamed in the baseline schema
+    # (sa.UniqueConstraint('name')), so each backend named it differently on
+    # its own: SQLite reflects it as nameless (`naming_convention` below is
+    # what lets batch mode's reflect-and-recreate synthesize the deterministic
+    # "uq_tags_name" for it), while Postgres auto-assigns "tags_name_key" and
+    # reports that real name back on reflection. A literal
+    # drop_constraint("uq_tags_name") only matches the SQLite name, so look up
+    # the constraint's actual name first and fall back to the synthesized one
+    # only when reflection reports none (the SQLite case).
+    bind = op.get_bind()
+    existing = next(
+        (
+            uc
+            for uc in sa.inspect(bind).get_unique_constraints("tags")
+            if uc["column_names"] == ["name"]
+        ),
+        None,
+    )
+    existing_name = (existing or {}).get("name") or "uq_tags_name"
     with op.batch_alter_table("tags", naming_convention=NAMING) as batch:
-        batch.drop_constraint("uq_tags_name", type_="unique")
+        batch.drop_constraint(existing_name, type_="unique")
         batch.create_unique_constraint("uq_tags_user_id_name", ["user_id", "name"])
 
 
 def downgrade() -> None:
     # tags: restore the global unique first (fails loudly if two users now share
-    # a name — better than silently corrupting the constraint).
+    # a name — better than silently corrupting the constraint). Both
+    # constraint names here were set explicitly (by this migration's own
+    # upgrade()), so unlike above no reflection is needed to find them.
     with op.batch_alter_table("tags", naming_convention=NAMING) as batch:
         batch.drop_constraint("uq_tags_user_id_name", type_="unique")
         batch.create_unique_constraint("uq_tags_name", ["name"])
