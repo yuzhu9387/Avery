@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import { Navigate, useSearchParams } from 'react-router-dom'
 
@@ -97,6 +97,20 @@ function CredentialsCard() {
     else signupMutation.mutate({ email, password, name })
   }
 
+  // The pending state below is deliberately left set while the browser navigates to
+  // the provider — but the browser can hand this exact page back. A back/forward-cache
+  // restore replays no mount and resets no state, so `oauthPending` returns still
+  // naming a provider and its button stays dead until a reload. `persisted` is
+  // precisely the "restored, did not remount" signal, and the only one: there is no
+  // unmount to clean up after and no render to notice.
+  useEffect(() => {
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) setOauthPending(null)
+    }
+    window.addEventListener('pageshow', onPageShow)
+    return () => window.removeEventListener('pageshow', onPageShow)
+  }, [])
+
   const startOAuth = async (provider: OAuthProvider) => {
     setOauthNote(null)
     setOauthPending(provider)
@@ -181,7 +195,7 @@ function CredentialsCard() {
         <button
           type="button"
           className={PROVIDER_BUTTON}
-          disabled={oauthPending !== null}
+          disabled={oauthPending === 'google'}
           onClick={() => startOAuth('google')}
         >
           <IconGoogle />
@@ -190,7 +204,7 @@ function CredentialsCard() {
         <button
           type="button"
           className={PROVIDER_BUTTON}
-          disabled={oauthPending !== null}
+          disabled={oauthPending === 'lark'}
           onClick={() => startOAuth('lark')}
         >
           <IconLark />
