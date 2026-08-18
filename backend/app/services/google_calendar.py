@@ -122,6 +122,12 @@ async def _fetch(access_token: str, params: dict) -> dict:
             detail = body.get("error", {}).get("message") or str(body)[:300]
         except Exception:
             detail = resp.text[:300]
+        if resp.status_code == 401:
+            # Token rejected — recoverable via a forced refresh, unlike the
+            # scope/console problems the other statuses describe.
+            raise calendar_links.ProviderUnauthorized(
+                f"calendar endpoint answered 401: {detail}"
+            )
         raise calendar_links.RefreshFailed(
             f"calendar endpoint answered {resp.status_code}: {detail}"
         )
@@ -139,8 +145,24 @@ async def list_events(
     `singleEvents=true` expands recurring series into individual occurrences —
     without it a weekly standup comes back as one master event with a recurrence
     rule, and the grid would draw it once instead of every week.
+
+    One forced-refresh retry on a 401: the provider's rejection outranks
+    whatever `expires_at` believes (see lark_calendar.list_events).
     """
-    access_token = await calendar_links.ensure_fresh_token(session, connection)
+    try:
+        token = await calendar_links.ensure_fresh_token(session, connection)
+        return await _fetch_window(token, connection, start, end)
+    except calendar_links.ProviderUnauthorized:
+        token = await calendar_links.ensure_fresh_token(session, connection, force=True)
+        return await _fetch_window(token, connection, start, end)
+
+
+async def _fetch_window(
+    access_token: str,
+    connection: CalendarConnection,
+    start: datetime,
+    end: datetime,
+) -> list[ExternalEvent]:
     payload = await _fetch(
         access_token,
         {

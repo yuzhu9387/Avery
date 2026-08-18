@@ -406,7 +406,9 @@ async def list_external_events(
             status.HTTP_409_CONFLICT, f"no {provider} calendar connected"
         )
     try:
-        events = await google_calendar.list_events(db, connection, start, end)
+        # Dispatch by provider — sending a Lark token to Google's API returns
+        # Google's 401 dressed up as a Lark problem.
+        events = await external_sync.FETCHERS[provider](db, connection, start, end)
     except calendar_links.RefreshFailed as exc:
         # The consent is gone or unusable. 409 rather than 500: nothing is broken,
         # the user simply has to reconnect, and the frontend treats it as "not

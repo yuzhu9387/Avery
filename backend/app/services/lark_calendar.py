@@ -39,11 +39,21 @@ async def _get(access_token: str, url: str, params: dict) -> dict:
         resp = await client.get(
             url, headers={"Authorization": f"Bearer {access_token}"}, params=params
         )
+    if resp.status_code == 401:
+        # The token itself was rejected — recoverable by a forced refresh, so
+        # signal it distinctly instead of the generic dead-end RefreshFailed.
+        raise calendar_links.ProviderUnauthorized(
+            f"lark calendar answered 401: {resp.text[:200]}"
+        )
     if resp.status_code != 200:
         raise calendar_links.RefreshFailed(
             f"lark calendar answered {resp.status_code}: {resp.text[:200]}"
         )
     payload = resp.json()
+    if payload.get("code") == 99991677:  # "Authentication token expired"
+        raise calendar_links.ProviderUnauthorized(
+            f"lark calendar error 99991677: {payload.get('msg', '')[:200]}"
+        )
     if payload.get("code") not in (0, None):
         raise calendar_links.RefreshFailed(
             f"lark calendar error {payload.get('code')}: {payload.get('msg', '')[:200]}"
@@ -112,7 +122,23 @@ async def list_events(
     start: datetime,
     end: datetime,
 ) -> list[ExternalEvent]:
-    access_token = await calendar_links.ensure_fresh_token(session, connection)
+    """One forced-refresh retry on a 401: `expires_at` can lie (a refresh race
+    leaves a voided token looking fresh), and the provider's own rejection is
+    the ground truth the clock isn't."""
+    try:
+        token = await calendar_links.ensure_fresh_token(session, connection)
+        return await _list_window(token, connection, start, end)
+    except calendar_links.ProviderUnauthorized:
+        token = await calendar_links.ensure_fresh_token(session, connection, force=True)
+        return await _list_window(token, connection, start, end)
+
+
+async def _list_window(
+    access_token: str,
+    connection: CalendarConnection,
+    start: datetime,
+    end: datetime,
+) -> list[ExternalEvent]:
     calendar_id = await _primary_calendar_id(access_token)
 
     out: list[ExternalEvent] = []

@@ -5,6 +5,7 @@ calendar access and signing in are different consents with different lifetimes:
 either can be revoked without touching the other.
 """
 
+import asyncio
 from datetime import datetime, timedelta
 
 import httpx
@@ -27,6 +28,17 @@ class NoConnection(Exception):
 
 class RefreshFailed(Exception):
     """The refresh token no longer works — the user has to reconnect."""
+
+
+class ProviderUnauthorized(RefreshFailed):
+    """The provider rejected the access token itself (a 401 from its API).
+
+    Distinct from the base class because this one is *recoverable*: the token
+    the provider rejected may simply be stale while the refresh token is fine —
+    Lark rotates refresh tokens, and a race between two refreshes leaves a
+    committed-but-invalidated access token behind with a future `expires_at`.
+    Callers catch this, force one refresh, and retry once; anything still
+    failing after that is a real RefreshFailed."""
 
 
 async def get_connection(
@@ -104,38 +116,75 @@ async def _post_refresh(provider: str, refresh_token: str) -> dict:
             },
         )
     if resp.status_code != 200:
-        raise RefreshFailed(f"refresh endpoint answered {resp.status_code}")
+        # The status alone hides *why* — "invalid_grant" (token consumed or
+        # revoked) reads very differently from a 500, and the difference decides
+        # whether reconnecting will help.
+        raise RefreshFailed(
+            f"refresh endpoint answered {resp.status_code}: {resp.text[:200]}"
+        )
     return resp.json()
 
 
+# One lock per connection row. Lark rotates refresh tokens — each refresh
+# invalidates the token that was just used, and replaying a consumed one can
+# void the whole grant. The frontend fires syncs in parallel, so two requests
+# routinely notice a stale token together; without this lock they race the same
+# refresh token and one of them kills the connection (observed in production:
+# every sync 409ing until a manual reconnect). Per-process only, which matches
+# how the race actually happens — one browser burst into one instance.
+_refresh_locks: dict[int, asyncio.Lock] = {}
+
+
 async def ensure_fresh_token(
-    session: AsyncSession, connection: CalendarConnection
+    session: AsyncSession, connection: CalendarConnection, *, force: bool = False
 ) -> str:
     """The access token to use right now, refreshing first when it is about to die.
+
+    `force=True` refreshes even when `expires_at` says the token is fine — for
+    callers holding a provider 401, which outranks anything the clock believes.
 
     Raises `RefreshFailed` when there is nothing to refresh with — a connection
     whose refresh token was never issued or has been revoked cannot recover on its
     own, and the honest answer is to make the user reconnect rather than retry
     forever against a token that will never work.
     """
-    if not needs_refresh(connection):
-        return connection.access_token
-    if not connection.refresh_token:
-        raise RefreshFailed("no refresh token on file — reconnect the calendar")
+    stale_token = connection.access_token
+    if not force and not needs_refresh(connection):
+        return stale_token
 
-    payload = await _post_refresh(connection.provider, connection.refresh_token)
-    access_token = payload.get("access_token")
-    if not access_token:
-        raise RefreshFailed("refresh response carried no access_token")
+    lock = _refresh_locks.setdefault(connection.id, asyncio.Lock())
+    async with lock:
+        # Whoever held the lock before us may have refreshed already. Compare
+        # against the committed row with a column select, not session.refresh():
+        # expiring the shared instance mid-flight would race any other task
+        # reading its attributes. A changed token answers both questions at
+        # once — someone else refreshed, and their token is the one to use.
+        committed = await session.scalar(
+            select(CalendarConnection.access_token).where(
+                CalendarConnection.id == connection.id
+            )
+        )
+        if committed is not None and committed != stale_token:
+            connection.access_token = committed  # keep the in-memory copy usable
+            return committed
+        if not connection.refresh_token:
+            raise RefreshFailed("no refresh token on file — reconnect the calendar")
 
-    connection.access_token = access_token
-    expires_in = payload.get("expires_in")
-    connection.expires_at = (
-        datetime.now() + timedelta(seconds=int(expires_in)) if expires_in else None
-    )
-    # A refresh response usually omits the refresh token; keep the existing one.
-    if payload.get("refresh_token"):
-        connection.refresh_token = payload["refresh_token"]
-    connection.updated_at = datetime.now()
-    await session.commit()
-    return access_token
+        payload = await _post_refresh(connection.provider, connection.refresh_token)
+        access_token = payload.get("access_token")
+        if not access_token:
+            raise RefreshFailed("refresh response carried no access_token")
+
+        connection.access_token = access_token
+        expires_in = payload.get("expires_in")
+        connection.expires_at = (
+            datetime.now() + timedelta(seconds=int(expires_in)) if expires_in else None
+        )
+        # A refresh response usually omits the refresh token; keep the existing
+        # one. When it IS present (Lark always rotates), saving it is what keeps
+        # the connection alive — the token we just spent is already void.
+        if payload.get("refresh_token"):
+            connection.refresh_token = payload["refresh_token"]
+        connection.updated_at = datetime.now()
+        await session.commit()
+        return access_token

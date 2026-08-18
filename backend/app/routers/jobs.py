@@ -34,11 +34,14 @@ from datetime import date, datetime
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
 from app.deps import verify_jobs_token
+from app.models import CalendarConnection
 from app.scheduler import jobs as job_service
+from app.services import calendar_links
 
 router = APIRouter(
     prefix="/api/jobs",
@@ -73,3 +76,36 @@ async def sweep_reminders(
     now = (body.now if body else None) or datetime.now()
     handled = await job_service.sweep_reminders(session, now)
     return {"handled": handled}
+
+
+@router.post("/refresh-calendar-tokens")
+async def refresh_calendar_tokens(
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Keepalive: force-rotate every stored calendar grant.
+
+    A Lark refresh token lives ~7 days and is consumed by use — the chain stays
+    alive only if *something* refreshes it inside that window, and a quiet week
+    (no syncs) would otherwise kill the connection of old age. Run on a schedule
+    well inside the window (daily). Force, not needs_refresh: the point is
+    rotating the refresh token, not the access token's remaining minutes.
+
+    Idempotent the same way the other jobs are: each run rotates whatever grants
+    exist; a retry just rotates them again. Failures are reported per connection
+    rather than failing the run — one dead grant must not stop the others from
+    being kept alive.
+    """
+    connections = (await session.scalars(select(CalendarConnection))).all()
+    refreshed = 0
+    failed: list[dict] = []
+    for connection in connections:
+        try:
+            await calendar_links.ensure_fresh_token(session, connection, force=True)
+            refreshed += 1
+        except calendar_links.RefreshFailed as exc:
+            failed.append({
+                "provider": connection.provider,
+                "user_id": connection.user_id,
+                "error": str(exc),
+            })
+    return {"refreshed": refreshed, "failed": failed}
