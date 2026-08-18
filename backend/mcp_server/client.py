@@ -151,3 +151,13 @@ class AveryClient:
 
     async def patch(self, path: str, json: dict | None = None) -> object:
         return (await self._request("PATCH", path, json=json)).json()
+
+    async def delete(self, path: str) -> object:
+        # 204 is the common case (events, routines, tags, rules, reminders,
+        # reports); tasks' DELETE is a 200 carrying the archived row. Guard on
+        # the status rather than on .json() raising, so a genuinely malformed
+        # 200 body still surfaces as an error instead of silently reading None.
+        response = await self._request("DELETE", path)
+        if response.status_code == 204 or not response.content:
+            return None
+        return response.json()

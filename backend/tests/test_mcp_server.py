@@ -1,7 +1,11 @@
 """mcp_server/ against a mocked Avery HTTP layer -- no live server, no network.
 
+Covers the shared plumbing: client construction, avery_today, error
+translation and client.delete. Per-entity tool behaviour lives in
+tests/test_mcp_tools_<entity>.py.
+
 Every test builds an AveryClient over httpx.MockTransport and swaps it into
-mcp_server.server._client, then calls the tool functions directly (the
+mcp_server.shared._client, then calls the tool functions directly (the
 @mcp.tool() decorator returns the original function unchanged, so these are
 just plain async calls, not a trip through the MCP wire protocol).
 """
@@ -9,7 +13,9 @@ just plain async calls, not a trip through the MCP wire protocol).
 import httpx
 import pytest
 
-import mcp_server.server as server_mod
+import mcp_server.server as server_mod  # noqa: F401  -- registers the tools
+import mcp_server.shared as shared_mod
+import mcp_server.tools.today as today_mod
 from mcp_server.client import (
     AveryAuthError,
     AveryClient,
@@ -22,9 +28,9 @@ from mcp_server.client import (
 @pytest.fixture(autouse=True)
 def _reset_client():
     """Each test wires its own AveryClient in; never leak one into the next."""
-    server_mod._client = None
+    shared_mod._client = None
     yield
-    server_mod._client = None
+    shared_mod._client = None
 
 
 def _install(handler) -> list:
@@ -42,7 +48,7 @@ def _install(handler) -> list:
         return handler(request)
 
     transport = httpx.MockTransport(_recording_handler)
-    server_mod._client = AveryClient(base_url="http://test", token="test-token", transport=transport)
+    shared_mod._client = AveryClient(base_url="http://test", token="test-token", transport=transport)
     return calls
 
 
@@ -64,233 +70,6 @@ def test_missing_agent_token_via_ensure_client_ready(monkeypatch):
     monkeypatch.delenv("AVERY_BASE_URL", raising=False)
     with pytest.raises(AveryConfigError):
         server_mod.ensure_client_ready()
-
-
-# ---------------------------------------------------------------- scheduling
-
-
-async def test_avery_schedule_creates_plain_event_with_agent_source_and_no_task():
-    calls = _install(
-        lambda req: _json_response(
-            201,
-            {
-                "id": 1,
-                "task_id": None,
-                "title": "Dentist",
-                "start_at": "2026-08-13T15:00:00",
-                "end_at": "2026-08-13T16:00:00",
-                "tag_ids": [],
-                "kind": "event",
-                "completed_at": None,
-                "source": "agent",
-                "routine_block_id": None,
-                "notes": "",
-            },
-        )
-    )
-
-    result = await server_mod.avery_schedule(
-        title="Dentist",
-        start_at="2026-08-13T15:00:00",
-        end_at="2026-08-13T16:00:00",
-    )
-
-    assert len(calls) == 1
-    method, path, body = calls[0]
-    assert (method, path) == ("POST", "/api/events")
-    assert body["source"] == "agent"
-    assert body["kind"] == "event"
-    # No task_id was sent -- this call must not schedule an *existing* to-do,
-    # and it must give create_event nothing that would make it mint one either.
-    assert "task_id" not in body
-
-    assert result["event_id"] == 1
-    assert result["task_id"] is None
-    assert result["source"] == "agent"
-
-
-async def test_avery_schedule_with_task_id_links_the_existing_task():
-    calls = _install(
-        lambda req: _json_response(
-            201,
-            {
-                "id": 2,
-                "task_id": 42,
-                "title": "Renew passport",
-                "start_at": "2026-08-13T09:00:00",
-                "end_at": "2026-08-13T09:30:00",
-                "tag_ids": [],
-                "kind": "event",
-                "completed_at": None,
-                "source": "agent",
-                "routine_block_id": None,
-                "notes": "",
-            },
-        )
-    )
-
-    result = await server_mod.avery_schedule(
-        title="Renew passport",
-        start_at="2026-08-13T09:00:00",
-        end_at="2026-08-13T09:30:00",
-        task_id=42,
-    )
-
-    _, _, body = calls[0]
-    assert body["task_id"] == 42
-    assert body["kind"] == "event"
-    assert result["task_id"] == 42
-
-
-@pytest.mark.parametrize(
-    "bad_value",
-    ["2026-08-13T15:00:00Z", "2026-08-13T15:00:00+00:00", "2026-08-13T15:00:00-07:00", "not-a-datetime"],
-)
-async def test_avery_schedule_rejects_timezone_suffixed_or_invalid_datetimes(bad_value):
-    calls = _install(lambda req: (_ for _ in ()).throw(AssertionError("must not call Avery")))
-    with pytest.raises(ValueError):
-        await server_mod.avery_schedule(title="X", start_at=bad_value, end_at="2026-08-13T16:00:00")
-    assert calls == []
-
-
-# --------------------------------------------------------------- task capture
-
-
-async def test_avery_capture_task_creates_task_and_no_event():
-    calls = _install(
-        lambda req: _json_response(
-            201,
-            {
-                "id": 7,
-                "name": "Renew passport",
-                "tag_ids": [],
-                "notes": "",
-                "status": "todo",
-                "due_date": "2026-09-01",
-                "est_minutes": None,
-                "is_floating": False,
-                "priority": "normal",
-                "created_at": "2026-08-13T10:00:00",
-                "completed_at": None,
-            },
-        )
-    )
-
-    result = await server_mod.avery_capture_task(name="Renew passport", due_date="2026-09-01")
-
-    assert len(calls) == 1
-    method, path, body = calls[0]
-    assert (method, path) == ("POST", "/api/tasks")
-    assert body["name"] == "Renew passport"
-    assert body["due_date"] == "2026-09-01"
-
-    assert result["task_id"] == 7
-    assert result["status"] == "todo"
-
-
-# ------------------------------------------------------------------ complete
-
-
-async def test_avery_complete_event_hits_the_event_completion_path():
-    calls = _install(
-        lambda req: _json_response(
-            200,
-            {
-                "id": 5,
-                "task_id": 9,
-                "title": "Team sync",
-                "start_at": "2026-08-13T10:00:00",
-                "end_at": "2026-08-13T10:30:00",
-                "tag_ids": [],
-                "kind": "task",
-                "completed_at": "2026-08-13T10:31:00",
-                "source": "manual",
-                "routine_block_id": None,
-                "notes": "",
-            },
-        )
-    )
-
-    result = await server_mod.avery_complete(event_id=5)
-
-    method, path, _ = calls[0]
-    assert (method, path) == ("POST", "/api/events/5/complete")
-    assert result["completed"] == "event"
-    assert result["event_id"] == 5
-    assert result["task_id"] == 9
-
-
-async def test_avery_complete_task_hits_the_task_status_path():
-    calls = _install(
-        lambda req: _json_response(
-            200,
-            {
-                "id": 9,
-                "name": "Finish report",
-                "tag_ids": [],
-                "notes": "",
-                "status": "done",
-                "due_date": None,
-                "est_minutes": None,
-                "is_floating": False,
-                "priority": "normal",
-                "created_at": "2026-08-01T00:00:00",
-                "completed_at": "2026-08-13T10:31:00",
-            },
-        )
-    )
-
-    result = await server_mod.avery_complete(task_id=9)
-
-    method, path, body = calls[0]
-    assert (method, path) == ("PATCH", "/api/tasks/9")
-    assert body == {"status": "done"}
-    assert result["completed"] == "task"
-    assert result["task_id"] == 9
-
-
-async def test_avery_complete_event_and_task_are_distinguishable_paths():
-    """Same tool, two different ids, two different HTTP calls -- proves the
-    two completion meanings never collapse into one code path."""
-    event_calls = _install(
-        lambda req: _json_response(
-            200,
-            {
-                "id": 1, "task_id": None, "title": "X", "start_at": "2026-08-13T09:00:00",
-                "end_at": "2026-08-13T10:00:00", "tag_ids": [], "kind": "event",
-                "completed_at": "2026-08-13T10:00:00", "source": "manual",
-                "routine_block_id": None, "notes": "",
-            },
-        )
-    )
-    event_result = await server_mod.avery_complete(event_id=1)
-    assert ("POST", "/api/events/1/complete") == (event_calls[0][0], event_calls[0][1])
-
-    task_calls = _install(
-        lambda req: _json_response(
-            200,
-            {
-                "id": 1, "name": "Y", "tag_ids": [], "notes": "", "status": "done",
-                "due_date": None, "est_minutes": None, "is_floating": False,
-                "priority": "normal", "created_at": "2026-08-01T00:00:00",
-                "completed_at": "2026-08-13T10:00:00",
-            },
-        )
-    )
-    task_result = await server_mod.avery_complete(task_id=1)
-    assert ("PATCH", "/api/tasks/1") == (task_calls[0][0], task_calls[0][1])
-
-    assert event_result["completed"] == "event"
-    assert task_result["completed"] == "task"
-
-
-async def test_avery_complete_requires_exactly_one_of_event_id_or_task_id():
-    calls = _install(lambda req: (_ for _ in ()).throw(AssertionError("must not call Avery")))
-    with pytest.raises(ValueError):
-        await server_mod.avery_complete()
-    with pytest.raises(ValueError):
-        await server_mod.avery_complete(event_id=1, task_id=2)
-    assert calls == []
 
 
 # --------------------------------------------------------------------- today
@@ -349,7 +128,7 @@ async def test_avery_today_shapes_a_summary_from_a_mixed_payload():
 
     _install(handler)
 
-    summary = await server_mod.avery_today(date="2026-08-13")
+    summary = await today_mod.avery_today(date="2026-08-13")
 
     assert summary["date"] == "2026-08-13"
 
@@ -383,7 +162,7 @@ async def test_avery_today_defaults_to_today(monkeypatch):
 
     import datetime as dt
 
-    result = await server_mod.avery_today()
+    result = await today_mod.avery_today()
     assert result["date"] == dt.date.today().isoformat()
     assert seen_params["start"].startswith(dt.date.today().isoformat())
 
@@ -394,7 +173,7 @@ async def test_avery_today_defaults_to_today(monkeypatch):
 async def test_401_raises_a_message_about_the_agent_token():
     _install(lambda req: httpx.Response(401, json={"detail": "not authenticated"}))
     with pytest.raises(AveryAuthError, match="invalid|revoked"):
-        await server_mod.avery_capture_task(name="X")
+        await today_mod.avery_today(date="2026-08-13")
 
 
 async def test_403_surfaces_the_workspace_message_verbatim():
@@ -402,7 +181,7 @@ async def test_403_surfaces_the_workspace_message_verbatim():
         lambda req: httpx.Response(403, json={"detail": "workspace 'work' is not yet supported"})
     )
     with pytest.raises(AveryForbidden, match="workspace 'work' is not yet supported"):
-        await server_mod.avery_capture_task(name="X")
+        await today_mod.avery_today(date="2026-08-13")
 
 
 async def test_connection_refused_names_avery_as_the_problem():
@@ -410,10 +189,10 @@ async def test_connection_refused_names_avery_as_the_problem():
         raise httpx.ConnectError("connection refused", request=request)
 
     transport = httpx.MockTransport(_raise_connect_error)
-    server_mod._client = AveryClient(base_url="http://test", token="tok", transport=transport)
+    shared_mod._client = AveryClient(base_url="http://test", token="tok", transport=transport)
 
     with pytest.raises(AveryUnavailable, match="not running|Could not reach"):
-        await server_mod.avery_capture_task(name="X")
+        await today_mod.avery_today(date="2026-08-13")
 
 
 async def test_401_403_and_connection_refused_are_distinct_exception_types():
@@ -424,3 +203,22 @@ async def test_401_403_and_connection_refused_are_distinct_exception_types():
     assert issubclass(AveryAuthError, Exception)
     assert issubclass(AveryForbidden, Exception)
     assert issubclass(AveryUnavailable, Exception)
+
+
+# ------------------------------------------------------------ client.delete
+
+
+async def test_client_delete_sends_delete_and_returns_none_for_204():
+    """Avery's delete routes return 204 with an empty body; .json() would raise."""
+    calls = _install(lambda request: httpx.Response(204))
+    client = shared_mod._client
+    result = await client.delete("/api/events/7")
+    assert result is None
+    assert calls == [("DELETE", "/api/events/7", None)]
+
+
+async def test_client_delete_returns_body_when_present():
+    """Tasks' DELETE returns 200 with the archived TaskOut."""
+    _install(lambda request: httpx.Response(200, json={"id": 3, "status": "archived"}))
+    result = await shared_mod._client.delete("/api/tasks/3")
+    assert result == {"id": 3, "status": "archived"}
