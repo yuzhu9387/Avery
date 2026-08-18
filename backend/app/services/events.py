@@ -76,9 +76,12 @@ async def create_event(session: AsyncSession, data: EventCreate, user_id: int) -
         # fighting over one status. The freshly minted Task's due date defaults to
         # the card's own end date — a task card is a to-do with a slot, so the
         # slot's end is naturally when it's due, rather than leaving it undated
-        # until the user sets one by hand.
+        # until the user sets one by hand. The schema guarantees task_name OR
+        # title is present; fall back to title so a title-only task card names
+        # its Task after the card instead of crashing on a None name.
         task = await task_service.create_by_name(
-            session, data.task_name, tag_ids, user_id, due_date=data.end_at.date()
+            session, data.task_name or data.title, tag_ids, user_id,
+            due_date=data.end_at.date(),
         )
     # else: a plain event (kind='event') named without a task_id mints nothing —
     # it carries its own title and stands on its own, task stays None.
@@ -128,7 +131,10 @@ async def _push_back_if_external(
         return
     if event.source == EventSource.LARK:
         # Lark write-back does not exist yet; refusing beats pretending.
-        raise google_calendar.PushFailed("lark write-back is not implemented yet")
+        raise google_calendar.PushUnsupported(
+            "this event lives on your Lark calendar — Avery can't edit it yet. "
+            "Change it in Lark and it will sync back."
+        )
     connection = await calendar_links.get_connection(session, event.user_id, event.source)
     if connection is None:
         raise google_calendar.PushFailed(
@@ -214,7 +220,10 @@ async def delete_event(session: AsyncSession, event_id: int, user_id: int) -> bo
         return False
     if event.source in (EventSource.GOOGLE, EventSource.LARK) and event.external_id:
         if event.source == EventSource.LARK:
-            raise google_calendar.PushFailed("lark write-back is not implemented yet")
+            raise google_calendar.PushUnsupported(
+                "this event lives on your Lark calendar — Avery can't delete it yet. "
+                "Delete it in Lark and the mirror will go with it."
+            )
         connection = await calendar_links.get_connection(session, event.user_id, event.source)
         if connection is None:
             raise google_calendar.PushFailed(

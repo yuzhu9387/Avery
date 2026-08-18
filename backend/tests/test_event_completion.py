@@ -22,6 +22,30 @@ async def test_event_can_be_created_as_a_task_card(client):
     assert created["kind"] == "task"
 
 
+async def test_task_card_with_title_only_names_its_task_after_the_title(client):
+    """The schema accepts title as the only name (task_name optional), so the
+    kind='task' path must fall back to it when minting the backing Task rather
+    than crashing on a None name."""
+    created = await client.post(
+        "/api/events",
+        json={
+            "title": "Renew passport",
+            "kind": "task",
+            "start_at": "2026-08-03T09:00:00",
+            "end_at": "2026-08-03T10:00:00",
+            "tag_ids": [],
+        },
+    )
+    assert created.status_code == 201, created.text
+    assert created.json()["kind"] == "task"
+    assert created.json()["title"] == "Renew passport"
+    task_id = created.json()["task_id"]
+    assert task_id is not None
+
+    task = (await client.get(f"/api/tasks/{task_id}")).json()
+    assert task["name"] == "Renew passport"
+
+
 async def test_unknown_kind_is_rejected(client):
     bad = await client.post(
         "/api/events",
@@ -181,3 +205,30 @@ async def test_roll_over_requires_at_least_one_id(client):
         "/api/events/roll-over", json={"event_ids": [], "to_date": "2026-08-04"}
     )
     assert bad.status_code == 422
+
+
+async def test_editing_a_lark_mirror_is_refused_as_a_client_error(client, session):
+    """Lark write-back does not exist, which is a fact about the request, not a
+    gateway failure. It used to answer 502 — a status CDNs treat as a broken
+    origin: Cloudflare replaced the JSON body with its own HTML page, and the
+    frontend surfaced "Unexpected token '<'" instead of the reason. A 4xx says
+    the same thing and travels intact.
+    """
+    from datetime import datetime
+
+    from app.models import Event
+
+    me = (await client.get("/api/auth/me")).json()
+    mirror = Event(
+        user_id=me["id"], title="PM System会",
+        start_at=datetime(2026, 8, 19, 14, 30), end_at=datetime(2026, 8, 19, 15, 0),
+        tag_ids=[], source="lark", kind="event", external_id="lark-evt-1",
+        all_day=False, notes="",
+    )
+    session.add(mirror)
+    await session.commit()
+
+    resp = await client.patch(f"/api/events/{mirror.id}", json={"title": "renamed"})
+
+    assert resp.status_code == 422, resp.text
+    assert "lark" in resp.json()["detail"].lower()

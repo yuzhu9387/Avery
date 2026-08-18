@@ -187,6 +187,16 @@ class PushFailed(Exception):
     """Google rejected the write-back; the local edit must not commit."""
 
 
+class PushUnsupported(PushFailed):
+    """This provider has no write-back at all — the edit can never succeed.
+
+    Separate from PushFailed because the two deserve different status classes.
+    A provider outage is a 502 (try again later); "Avery cannot write to Lark"
+    is a fact about the request, and answering 5xx for it made a CDN treat the
+    origin as broken — Cloudflare replaced the JSON body with an HTML error
+    page, so the browser reported a JSON parse error instead of the reason."""
+
+
 async def _push(access_token: str, external_id: str, method: str, body: dict | None) -> None:
     """Isolated for the same reason as `_fetch`: tests substitute it."""
     async with httpx.AsyncClient(timeout=15) as client:

@@ -9,7 +9,7 @@ from app.models import User
 from app.schemas.event import EventCreate, EventMove, EventOut, EventRollOver, EventUpdate
 from app.services import events as service
 from app.services.calendar_links import RefreshFailed
-from app.services.google_calendar import PushFailed
+from app.services.google_calendar import PushFailed, PushUnsupported
 from app.services.tags import UnknownTagIds
 
 router = APIRouter(prefix="/api/events", tags=["events"])
@@ -68,6 +68,9 @@ async def update_event(
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"unknown tag ids: {exc}")
     except ValueError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc))
+    except PushUnsupported as exc:
+        # Not a gateway problem — the edit is impossible, not merely failing now.
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc))
     except PushFailed as exc:
         # The provider refused the write-back, so nothing changed locally either.
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc))
@@ -83,6 +86,9 @@ async def move_event(event_id: int, data: EventMove, session: AsyncSession = Dep
     user: User = Depends(get_current_user)):
     try:
         event = await service.move_event(session, event_id, data.start_at, user.id)
+    except PushUnsupported as exc:
+        # Not a gateway problem — the edit is impossible, not merely failing now.
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc))
     except PushFailed as exc:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc))
     except RefreshFailed as exc:
@@ -115,6 +121,9 @@ async def delete_event(event_id: int, session: AsyncSession = Depends(get_sessio
     user: User = Depends(get_current_user)):
     try:
         deleted = await service.delete_event(session, event_id, user.id)
+    except PushUnsupported as exc:
+        # Not a gateway problem — the edit is impossible, not merely failing now.
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc))
     except PushFailed as exc:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc))
     except RefreshFailed as exc:

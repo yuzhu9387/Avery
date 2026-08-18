@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { ApiError, errorMessage } from './client'
+import { ApiError, apiSend, errorMessage } from './client'
 
 describe('errorMessage', () => {
   it('is null when there is nothing to show', () => {
@@ -40,5 +40,51 @@ describe('errorMessage', () => {
     const message = errorMessage(error)
     expect(message).not.toBeNull()
     expect(message).not.toBe('')
+  })
+})
+
+// ---------------------------------------------------------------- unwrap
+
+/** A CDN in front of the API replaces error bodies with its own HTML page.
+ *  Observed in production: Cloudflare turns the backend's
+ *  `{"detail":"lark write-back is not implemented yet"}` 502 into
+ *  `<!DOCTYPE html>...`, and parsing it before checking `res.ok` threw
+ *  `SyntaxError: Unexpected token '<'` — which reached the UI *instead of*
+ *  the failure it was hiding. */
+const CDN_ERROR_PAGE = '<!DOCTYPE html>\n<html><head><title>502</title></head></html>'
+
+function respondWith(status: number, body: string, contentType: string) {
+  globalThis.fetch = (async () =>
+    new Response(body, {
+      status,
+      headers: { 'Content-Type': contentType },
+    })) as typeof fetch
+}
+
+describe('apiSend error handling', () => {
+  it('reports the HTTP failure when the body is a CDN HTML page, not a parse error', async () => {
+    respondWith(502, CDN_ERROR_PAGE, 'text/html')
+
+    const error = await apiSend('PATCH', '/events/91', { title: 'x' }).catch((e) => e)
+
+    expect(error).toBeInstanceOf(ApiError)
+    expect((error as ApiError).status).toBe(502)
+    expect(errorMessage(error)).not.toMatch(/JSON|token/i)
+  })
+
+  it('still surfaces the backend detail when the body IS json', async () => {
+    respondWith(502, JSON.stringify({ detail: 'lark write-back is not implemented yet' }), 'application/json')
+
+    const error = await apiSend('PATCH', '/events/91', { title: 'x' }).catch((e) => e)
+
+    expect((error as ApiError).detail).toBe('lark write-back is not implemented yet')
+  })
+
+  it('does not mask a malformed body on a successful response', async () => {
+    respondWith(200, 'not json at all', 'application/json')
+
+    const error = await apiSend('PATCH', '/events/91', { title: 'x' }).catch((e) => e)
+
+    expect(error).toBeInstanceOf(Error)
   })
 })

@@ -43,7 +43,21 @@ export function errorMessage(error: unknown): string | null {
 async function unwrap<T>(res: Response): Promise<T> {
   if (res.status === 204) return undefined as T
   const text = await res.text()
-  const body = text ? JSON.parse(text) : null
+  // Parse defensively on the failure path: a CDN or load balancer between the
+  // browser and the API answers 5xx with its own HTML page, not the backend's
+  // {detail}. Parsing that before the `res.ok` check threw a SyntaxError which
+  // *replaced* the real failure — "Unexpected token '<'" is what reached the UI
+  // when Cloudflare rewrote a 502. An unparseable body on a failed response is
+  // simply a response with no detail; the status still says what happened.
+  // A malformed body on a *successful* response is a genuine bug and still throws.
+  let body: any = null
+  if (text) {
+    try {
+      body = JSON.parse(text)
+    } catch (error) {
+      if (res.ok) throw error
+    }
+  }
   if (!res.ok) {
     // FastAPI sends {detail: string} for HTTPException and
     // {detail: [{loc, msg, ...}]} for validation failures.
