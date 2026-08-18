@@ -1,6 +1,23 @@
-# Avery
+<p align="center">
+  <img src="frontend/public/avery-logo.png" width="110" alt="Avery logo" />
+</p>
 
-A personal schedule agent that holds the three things you can't hold in your head at once:
+<h1 align="center">Avery</h1>
+
+<p align="center">
+  <em>A personal schedule agent — routine, reality, and the ratio between them.</em>
+</p>
+
+<p align="center">
+  <a href="https://avery.dodofamily.com"><strong>🌐 Live app</strong></a> ·
+  <a href="#install--the-mcp-server">🤖 MCP server</a> ·
+  <a href="#the-lark-bot">💬 Lark bot</a> ·
+  <a href="#connecting-google--lark-calendars">📅 Calendar sync</a>
+</p>
+
+---
+
+Avery holds the three things you can't hold in your head at once:
 
 - **what a normal week looks like** — a *routine*, your recurring blocks
 - **what actually happened** — real calendar events, which always drift from the routine
@@ -10,37 +27,28 @@ Avery is not a calendar. It's a feedback loop: the routine stamps out a week, th
 reality, and the ratio tells you whether reality matched what you said mattered. Then you adjust
 either your behaviour or the rule.
 
-It runs entirely on your machine — a FastAPI backend over SQLite, a React calendar, and an MCP
-server so an assistant like Claude can read and change your schedule in conversation.
+<p align="center">
+  <img src="docs/images/week-view.png" alt="Avery week view — routine bands, events, live ratio progress" />
+</p>
+
+It's a FastAPI backend, a React calendar, and an MCP server so an assistant like Claude can read
+and change your schedule in conversation. Run it locally on SQLite, or deploy it — the hosted
+instance runs on Cloud Run + Cloud SQL (see [`DEPLOY.md`](DEPLOY.md)).
 
 ---
 
 ## Contents
 
-- [What's in the box](#whats-in-the-box)
 - [Concepts](#concepts)
 - [Features](#features)
-- [Install — the web app](#install--the-web-app)
-- [Install — the MCP server](#install--the-mcp-server)
-- [Connecting Google / Lark calendars](#connecting-google--lark-calendars)
+- [Integrations](#integrations)
+  - [The MCP server](#install--the-mcp-server)
+  - [The Lark bot](#the-lark-bot)
+  - [Google / Lark calendars](#connecting-google--lark-calendars)
+- [Onboarding — as a user](#onboarding--as-a-user)
+- [Onboarding — as a developer](#onboarding--as-a-developer)
 - [API surface](#api-surface)
-- [Tests](#tests)
 - [Known gaps](#known-gaps)
-
----
-
-## What's in the box
-
-```
-backend/          FastAPI + async SQLAlchemy + SQLite + Alembic
-  app/            models, routers, services, scheduler
-  mcp_server/     stdio MCP server exposing 4 intent-shaped tools
-  tests/          pytest (308 passing)
-frontend/         React 19 + TypeScript + Vite + Tailwind 4
-  src/            pages, components, hooks, pure-logic lib (133 vitest passing)
-docs/             design specs, plans, backlog, OAuth setup
-data/             your SQLite database lives here (git-ignored)
-```
 
 ---
 
@@ -56,13 +64,6 @@ Four nouns. Getting these straight makes everything else obvious.
 | **Rule** | A versioned ratio target — e.g. 6 : 3 : 1 across *Work & Study* / *Family care* / *Fitness*, with a tolerance. Editing a rule closes the old version and opens a new one, so old reports still mean what they meant. |
 
 Events carry **categories** (tags) with colours, which is what the ratio maths groups on.
-
-Two things worth internalising:
-
-- **Times are naive local wall-clock.** `2026-08-12T15:00:00` — no timezone, no `Z`. The API rejects
-  timezone-suffixed input rather than guessing.
-- **Routine-born events are background.** They render as tinted bands behind real events, and are
-  read-only on the calendar — you edit the *block*, and the change applies to every occurrence.
 
 ---
 
@@ -136,7 +137,178 @@ job rolls next week's routine every Sunday.
 
 ---
 
-## Install — the web app
+## Integrations
+
+Three ways in besides the web UI. All of them end at the same authenticated HTTP API — there is no
+side door.
+
+```mermaid
+flowchart LR
+    subgraph clients ["Clients"]
+      UI["🖥 Web UI"]
+      MCP["🤖 MCP client<br/>(Claude Code / Desktop)"]
+      LARK["💬 Lark chat"]
+    end
+    GOOSE["Goose bridge<br/>(gateway + intent router)"]
+    API["Avery HTTP API<br/>(session cookie / agent token)"]
+    DB[("SQLite / Postgres")]
+    GCAL["Google Calendar"]
+    LCAL["Lark Calendar"]
+
+    UI -->|session cookie| API
+    MCP -->|agent token| API
+    LARK -->|webhook| GOOSE -->|agent token| API
+    API --> DB
+    API <-->|OAuth mirror| GCAL
+    API <-->|OAuth mirror| LCAL
+```
+
+### Install — the MCP server
+
+Lets an MCP client (Claude Code, Claude Desktop, …) read and change your schedule in conversation.
+It talks to the HTTP API over stdio, authenticating with an **agent token**.
+
+**1. Issue an agent token.** There is **no UI for this yet**. While signed in to the web app, open
+the browser console and run:
+
+```js
+await fetch('/api/agent-tokens', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ name: 'claude', workspace: 'personal' }),
+}).then(r => r.json())
+```
+
+Copy the `token` field. **It is shown exactly once** — only its hash is stored. Revoke it later with
+`DELETE /api/agent-tokens/{id}`.
+
+**2. Point your client at the server.** Copy `.mcp.json.example` to `.mcp.json`, replace the two
+absolute paths and paste your token:
+
+```json
+{
+  "mcpServers": {
+    "avery": {
+      "command": "/absolute/path/to/avery/backend/.venv/bin/python",
+      "args": ["-m", "mcp_server"],
+      "cwd": "/absolute/path/to/avery/backend",
+      "env": {
+        "AVERY_BASE_URL": "http://127.0.0.1:8001",
+        "AVERY_AGENT_TOKEN": "paste-the-token-here"
+      }
+    }
+  }
+}
+```
+
+Set `AVERY_BASE_URL` to `http://127.0.0.1:8001` for a local backend, or to your deployed URL
+(e.g. `https://avery.dodofamily.com`) to let the assistant manage the hosted schedule.
+`.mcp.json` is git-ignored — it holds a live credential.
+
+**3. Tools it exposes.** Eleven. Ten cover one entity each and take an `action`;
+`avery_today` is the cross-entity "what's my day" aggregation.
+
+| Tool | Actions |
+|---|---|
+| `avery_today(date?)` | — one call for the day's schedule, open to-dos and anything overdue |
+| `avery_events` | list, get, create, update, delete, move, complete, uncomplete, roll_over |
+| `avery_tasks` | list, get, create, update, archive, stats |
+| `avery_tags` | list, get, create, update, delete, archive |
+| `avery_routines` | list, get, active, create, update, delete, preview, materialize |
+| `avery_routine_blocks` | create, update, delete |
+| `avery_rules` | list, get, active, create, update, delete |
+| `avery_reminders` | list, get, create, update, delete |
+| `avery_reports` | list, run, get, delete |
+| `avery_calendar` | week, month |
+| `avery_analytics` | evaluate |
+
+All datetimes are naive local (`2026-08-12T15:00:00`); timezone suffixes are
+rejected rather than guessed at. The server fails loudly at startup if
+`AVERY_AGENT_TOKEN` is missing, rather than on the first tool call.
+
+**Not exposed, deliberately:** `auth`, `agent-tokens`, `jobs`, `seed`. An agent
+that could reach `agent-tokens` could mint itself fresh credentials; one that
+could reach `auth` could change the account password. Tokens are issued and
+revoked from the web app only.
+
+### The Lark bot
+
+Chat with your schedule from Lark — "明天下午三点安排一小时写周报" becomes a booked event. The
+chain: your message hits a **Lark bot**, whose webhook lands on the **Goose bridge** (a separate
+gateway + LLM intent router, in its own repo); Goose recognises schedule intent, picks a tool from
+its schedule skill (`event.create`, `day.view`, `week.view`, `event.move`, `event.complete`,
+`rollover`, …) and calls the Avery API with an agent token — the same API surface the MCP server
+uses.
+
+To wire it up you need the Goose repo running, then:
+
+1. **Issue an Avery agent token** (console call above) and put it in Goose's env.
+2. **Create a Lark app** with a bot capability; put its `App ID` / `App Secret` / `Encrypt Key`
+   in Goose's env.
+3. **Point the Lark app's event subscription** at the Goose gateway:
+   `https://<your-gateway>/lark/events` — Lark sends a challenge on save, so the gateway must be
+   running and reachable when you paste the URL.
+4. Subscribe the app to `im.message.receive_v1`, publish an app version, and chat.
+
+### Connecting Google / Lark calendars
+
+See [`docs/OAUTH_SETUP.md`](docs/OAUTH_SETUP.md) for provider setup. Sign-in and calendar access are
+**separate consents** — signing in with Google does not grant Avery your calendar.
+
+Once connected, Avery **mirrors** provider events into its own table (`source: google` / `lark`),
+which means **they count toward your ratios**. The mirror re-syncs every time you view a week, so
+provider-side edits flow in on their own. Edits to a mirrored Google event push back to Google;
+Lark write-back is not implemented.
+
+> `docs/OAUTH_SETUP.md` is stale on this point — it describes an earlier design where external events
+> were an overlay that never entered the database and never counted. The code mirrors and counts them.
+> Trust the code.
+
+Google apps in *Testing* mode only authorise whitelisted test users, and their refresh tokens expire
+after about seven days, so the connection needs periodic reconnecting.
+
+---
+
+## Onboarding — as a user
+
+You need nothing installed — a deployed instance does it all in the browser
+(e.g. **[avery.dodofamily.com](https://avery.dodofamily.com)**).
+
+1. **Create an account** — email + password, or Continue with Google / Lark. Every API route is
+   authenticated, so nothing works until you do.
+2. **Seed the starter data** — eight categories, a 6:3:1 rule, and a default weekly routine. From
+   the browser console while signed in:
+
+   ```js
+   await fetch('/api/seed', { method: 'POST' }).then(r => r.json())
+   ```
+
+   Seeding is per-user and idempotent — running it twice creates nothing the second time.
+3. **Open the week view.** It materialises the current week from your routine on first read. Click
+   empty space to create, double-click a card to complete, drag to move.
+4. *(Optional)* **Connect your calendars** — Account page → connect Google / Lark; provider events
+   mirror in and count toward your ratios.
+5. *(Optional)* **Talk to it** — hook up [an MCP client](#install--the-mcp-server) or
+   [the Lark bot](#the-lark-bot) and manage your schedule in conversation.
+
+## Onboarding — as a developer
+
+For running the app locally — the stack is FastAPI + async SQLAlchemy + SQLite + Alembic on the
+back, React 19 + TypeScript + Vite + Tailwind 4 on the front.
+
+```
+backend/          FastAPI + async SQLAlchemy + SQLite + Alembic
+  app/            models, routers, services, scheduler
+  mcp_server/     stdio MCP server exposing 4 intent-shaped tools
+  seeds/          one-shot importer for a real routine/tags/rules snapshot
+  tests/          pytest (308 passing)
+frontend/         React 19 + TypeScript + Vite + Tailwind 4
+  src/            pages, components, hooks, pure-logic lib (133 vitest passing)
+docs/             design specs, plans, backlog, OAuth setup
+data/             your SQLite database lives here (git-ignored)
+Dockerfile        single-container build: static frontend served by the backend
+DEPLOY.md         Cloud Run + Cloud SQL + Cloud Scheduler walkthrough
+```
 
 ### Requirements
 
@@ -176,20 +348,8 @@ npm install
 npm run dev
 ```
 
-Open **http://localhost:5173**. Vite proxies `/api` to `127.0.0.1:8001`.
-
-### First run
-
-1. Open the app and **create an account** — the API is authenticated, so nothing works until you do.
-2. Seed the starter data — eight categories, a 6:3:1 rule, and a default weekly routine. From the
-   browser console while signed in:
-
-   ```js
-   await fetch('/api/seed', { method: 'POST' }).then(r => r.json())
-   ```
-
-   (Seeding is per-user and idempotent — running it twice creates nothing the second time.)
-3. Go to the week view. It materialises the current week from your routine on first read.
+Open **http://localhost:5173**. Vite proxies `/api` to `127.0.0.1:8001`. First run: create an
+account and seed, same as [user onboarding](#onboarding--as-a-user).
 
 ### Environment variables
 
@@ -197,92 +357,32 @@ All optional unless you want OAuth. Names only — set values in `backend/.env`:
 
 | Variable | Purpose |
 |---|---|
-| `DATABASE_URL` | SQLite path; defaults to `data/avery.db` |
+| `DATABASE_URL` | SQLite path; defaults to `data/avery.db` (Postgres URL in production) |
 | `ENABLE_SCHEDULER` | Turn the background jobs on/off |
 | `WEEK_ROLL_HOUR` | Local hour on Sunday to materialise next week |
+| `JOBS_TOKEN` | Shared secret for the `/api/jobs/*` endpoints (Cloud Scheduler) |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google sign-in + calendar |
 | `LARK_APP_ID` / `LARK_APP_SECRET` | Lark sign-in + calendar |
 | `OAUTH_REDIRECT_BASE` | Base URL OAuth providers redirect back to |
+| `TZ` | Container timezone — calendar sync converts provider timestamps with it |
 
----
+### Tests
 
-## Install — the MCP server
-
-Lets an MCP client (Claude Code, Claude Desktop, …) read and change your schedule in conversation.
-It talks to the same HTTP API over stdio, authenticating with an **agent token**.
-
-### 1. Issue an agent token
-
-There is **no UI for this yet**. With the backend running and while signed in to the web app, open
-the browser console and run:
-
-```js
-await fetch('/api/agent-tokens', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ name: 'claude', workspace: 'personal' }),
-}).then(r => r.json())
+```bash
+cd backend  && arch -arm64 .venv/bin/pytest -q     # 308 passing
+cd frontend && npx vitest run                       # 133 passing
+cd frontend && npx tsc -b                           # typecheck
 ```
 
-Copy the `token` field. **It is shown exactly once** — only its hash is stored. Revoke it later with
-`DELETE /api/agent-tokens/{id}`.
+The frontend suite runs in a Node environment with no DOM, so the pure logic — grid geometry, overlap
+layout, tag visibility, due-date grouping, roll-over predicates — is unit-tested, while component
+behaviour is verified in a browser.
 
-### 2. Point your client at the server
+### Deploying
 
-Copy `.mcp.json.example` to `.mcp.json`, replace the two absolute paths and paste your token:
-
-```json
-{
-  "mcpServers": {
-    "avery": {
-      "command": "/absolute/path/to/avery/backend/.venv/bin/python",
-      "args": ["-m", "mcp_server"],
-      "cwd": "/absolute/path/to/avery/backend",
-      "env": {
-        "AVERY_BASE_URL": "http://127.0.0.1:8001",
-        "AVERY_AGENT_TOKEN": "paste-the-token-here"
-      }
-    }
-  }
-}
-```
-
-`.mcp.json` is git-ignored — it holds a live credential.
-
-### 3. Tools it exposes
-
-Four, shaped around intent rather than mirroring the REST API:
-
-| Tool | What it does |
-|---|---|
-| `avery_today(date?)` | One call for "what's my day" — that day's schedule, open to-dos, and anything overdue |
-| `avery_schedule(title, start_at, end_at, …)` | Books a calendar event |
-| `avery_capture_task(name, due_date?, …)` | Records a to-do with no slot |
-| `avery_complete(event_id? \| task_id?)` | Marks exactly one thing done |
-
-All of them require naive-local datetimes (`2026-08-12T15:00:00`) and reject timezone suffixes
-outright rather than guessing what you meant.
-
-The server fails loudly at startup if `AVERY_AGENT_TOKEN` is missing, rather than on the first tool
-call.
-
----
-
-## Connecting Google / Lark calendars
-
-See [`docs/OAUTH_SETUP.md`](docs/OAUTH_SETUP.md) for provider setup. Sign-in and calendar access are
-**separate consents** — signing in with Google does not grant Avery your calendar.
-
-Once connected, Avery **mirrors** provider events into its own table (`source: google` / `lark`),
-which means **they count toward your ratios**. Edits to a mirrored Google event push back to Google;
-Lark write-back is not implemented.
-
-> `docs/OAUTH_SETUP.md` is stale on this point — it describes an earlier design where external events
-> were an overlay that never entered the database and never counted. The code mirrors and counts them.
-> Trust the code.
-
-Google apps in *Testing* mode only authorise whitelisted test users, and their refresh tokens expire
-after about seven days, so the connection needs periodic reconnecting.
+[`DEPLOY.md`](DEPLOY.md) walks through the production setup end to end: single Cloud Run service
+(static frontend served by FastAPI), Cloud SQL Postgres over the unix socket, secrets in Secret
+Manager, and two Cloud Scheduler jobs hitting the token-guarded `/api/jobs/*` endpoints.
 
 ---
 
@@ -305,23 +405,10 @@ Everything is under `/api` and requires authentication (session cookie **or** `A
 | `/api/analytics/evaluate` | Metrics + verdicts for a period |
 | `/api/weeks/{day}`, `/api/months/{yyyy-mm}` | Calendar payloads |
 | `/api/integrations` | Provider status, calendar authorize/disconnect, sync |
+| `/api/jobs` | Token-guarded roll-week / sweep-reminders for an external scheduler |
 | `/api/seed` | Idempotent per-user starter data |
 
 Interactive docs at `http://127.0.0.1:8001/docs` while signed in.
-
----
-
-## Tests
-
-```bash
-cd backend  && arch -arm64 .venv/bin/pytest -q     # 308 passing
-cd frontend && npx vitest run                       # 133 passing
-cd frontend && npx tsc -b                           # typecheck
-```
-
-The frontend suite runs in a Node environment with no DOM, so the pure logic — grid geometry, overlap
-layout, tag visibility, due-date grouping, roll-over predicates — is unit-tested, while component
-behaviour is verified in a browser.
 
 ---
 
