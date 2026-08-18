@@ -5,4 +5,5 @@ registration -- they are not unused, and removing one silently drops that
 tool from the server's advertised list.
 """
 
+from mcp_server.tools import events  # noqa: F401
 from mcp_server.tools import today  # noqa: F401
