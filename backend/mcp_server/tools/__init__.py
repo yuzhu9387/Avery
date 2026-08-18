@@ -12,4 +12,5 @@ from mcp_server.tools import routines  # noqa: F401
 from mcp_server.tools import rules  # noqa: F401
 from mcp_server.tools import reminders  # noqa: F401
 from mcp_server.tools import reports  # noqa: F401
+from mcp_server.tools import analytics  # noqa: F401
 from mcp_server.tools import today  # noqa: F401
